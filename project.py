@@ -1,6 +1,7 @@
 # Sandra Sanchez
 # NLP Eval project
 import random
+from collections import Counter
 
 from timeit import default_timer as timer
 import numpy as np
@@ -17,10 +18,13 @@ from nltk.tag import hmm, crf, perceptron
 from sklearn import metrics
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import make_scorer, accuracy_score, ConfusionMatrixDisplay
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_validate
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn_crfsuite import metrics as metrics_crf
+from yellowbrick.model_selection import CVScores
+from sklearn.model_selection import KFold
+from sklearn.model_selection import cross_val_score
 
 
 def read_datasets(corpus_dirname, train_filename, dev_filename, test_filename):
@@ -173,7 +177,7 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents):
     print(f"Predicted tagged val sentence {model_outputs[0]}")
 
     accuracy = tagger.evaluate(tagged_val_sents)
-    print("Accuracy on the validation set:", accuracy)  # 0.9528898254063817
+    print(f"Accuracy on the validation set with {str(tagger)}:", accuracy)  # 0.9793798916315473
     predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
     # predicted_labels = [[tag for token, tag in sent] for sent in model_outputs] # for sentence accuracy, but it does not work
 
@@ -297,6 +301,8 @@ def tune(X_train, y_train):
 
 
 def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
+    highest_accuracy = 0
+    best_params = None
     results = []
     training_opt = {"delta": [0.000010, 0.1], 'linesearch': ['MoreThuente', 'Backtracking', 'StrongBacktracking'],
                     'c1': [0, 0.01, 0.1, 0.2], 'c2': [1, 0.01, 0.1, 0.2],
@@ -305,19 +311,47 @@ def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
     for i in range(10):
         start = timer()
         params = {key: random.sample(value, 1)[0] for key, value in training_opt.items()}
-        print(params)
+        # print(params)
         tagger = crf.CRFTagger(training_opt=params)
         tagger.train(tagged_train_sents, 'model.crf.tagger')
         model_outputs = tagger.tag_sents(sentences_val)
         accuracy = tagger.evaluate(tagged_val_sents)
+        if accuracy > highest_accuracy:
+            highest_accuracy = accuracy
+            best_params = params
         end = timer()
         results_list = params, accuracy, end - start
         results.append(results_list)
     df = pd.DataFrame(results, columns = ['Parameters', 'Accuracy', 'Time'])
     print(df)
-    plt.show()
-    return df
+    print(best_params)
+    return df, highest_accuracy, best_params
 
+
+def k_fold_validation(tagger, X_val, y_val):
+    # X_train_data = np.asarray(X_train_data)
+    # y_train_data = np.asarray(y_train_data)
+    # cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    # rf = crf.CRFTagger()
+    # visualizer = CVScores(rf, cv=cv, scoring='accuracy')
+    # visualizer.fit(X_train_data, y_train_data)
+    # visualizer.show()
+    cv_results = cross_validate(tagger, X_val, y_val, cv=3, scoring=['f1_weighted', 'f1_micro', 'f1_macro'])
+    for key, value in cv_results.items():
+        print(value, '\t', key)
+
+
+def print_state_features(tagger):
+    pass
+    # state_features = tagger.__getattribute__()
+    # for (attr, label), weight in tagger:
+    #     print("%0.6f %-8s %s" % (weight, label, attr))
+    #
+    # print("Top positive:")
+    # print_state_features(Counter(crf.state_features_).most_common(20))
+    #
+    # print("\nTop negative:")
+    # print_state_features(Counter(crf.state_features_).most_common()[-20:])
 
 
 def reformat_labels(val_labels, val_predicted_labels):
@@ -355,11 +389,6 @@ y_val = [sent2labels(s) for s in tagged_sents_val]
 # Train & evaluate model
 model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
                                                                       tagged_sents_val)  # Accuracy on the validation set: 0.9793798916315473
-# print(sentences_val[:4])
-# print(predicted_token_labels[:4])
-# y_true, y_predictions = reformat_labels(gold_sent_labels_val, predicted_token_labels)
-# print(len(y_true), len(y_predictions))
-# print(y_true)
 print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
 
 # Hyperparameter tuning
@@ -377,10 +406,13 @@ model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(t
                                                                                                 sentences_val, tagged_sents_val,
                                                                                                 sentences_train)  # Accuracy on the validation set:
 ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
+plt.grid(None)
 plt.show()
 # accuracy, y_pred, labels = get_best_parameters(X_train, y_train, y_val, is_tuned=False) # 0.9996989765201686
 # best_params = tune(X_train, y_train)
-tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
+dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
+# k_fold_validation(tagger, X_val, y_val)
+
 
 
 
