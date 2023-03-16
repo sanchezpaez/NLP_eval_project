@@ -360,6 +360,18 @@ def reformat_labels(val_labels, val_predicted_labels):
     return y_gold, y_predicted
 
 
+def error_analysis(model_outputs, tagged_val_sentences):
+    for i in range(len(model_outputs)):
+        sentence = model_outputs[i]
+        gold_sentence = tagged_val_sentences[i]
+        for j in range(len(sentence)):
+            token, predicted_label = sentence[j]
+            real_label = gold_sentence[j][1]
+            if predicted_label != real_label:
+                # get the original raw text with the corresponding index
+                print(f"Incorrect predicted label '{predicted_label}' at token '{token}' in sentence: \n    {sentence}\n")
+
+
 # 1: EXTRACT AND REFORMAT DATA
 train_data, val_data, test_data = read_datasets('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
                                                 'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')
@@ -412,6 +424,7 @@ plt.show()
 # best_params = tune(X_train, y_train)
 dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
 # k_fold_validation(tagger, X_val, y_val)
+error_analysis(model_outputs, tagged_sents_val)
 
 
 
