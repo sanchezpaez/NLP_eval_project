@@ -361,6 +361,9 @@ def reformat_labels(val_labels, val_predicted_labels):
 
 
 def error_analysis(model_outputs, tagged_val_sentences):
+    count = 0
+    incorrectly_labeled_tokens = 0
+    tokens = {}
     for i in range(len(model_outputs)):
         sentence = model_outputs[i]
         gold_sentence = tagged_val_sentences[i]
@@ -368,8 +371,23 @@ def error_analysis(model_outputs, tagged_val_sentences):
             token, predicted_label = sentence[j]
             real_label = gold_sentence[j][1]
             if predicted_label != real_label:
+                incorrectly_labeled_tokens += 1
+                count += 1
+                try:
+                    tokens[token] += 1
+                except KeyError:
+                    tokens[token] = 1
+                # if token in tokens:
+                #     tokens[token] += tokens[token]
+                # else:
+                #     tokens[token] = 1
                 # get the original raw text with the corresponding index
-                print(f"Incorrect predicted label '{predicted_label}' at token '{token}' in sentence: \n    {sentence}\n")
+                print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence: \n    {i, gold_sentence}\n")
+    print(f"{incorrectly_labeled_tokens} incorrectly labeled tokens.")
+    # ranked_error_tokens = sorted(tokens, key=tokens.get, reverse=True)
+    ranked_error_tokens = sorted(tokens.items(), key=lambda x: x[1], reverse=True)
+    print(ranked_error_tokens)
+
 
 
 # 1: EXTRACT AND REFORMAT DATA
@@ -425,6 +443,7 @@ plt.show()
 dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
 # k_fold_validation(tagger, X_val, y_val)
 error_analysis(model_outputs, tagged_sents_val)
+# print(tagged_sents_val)
 
 
 
