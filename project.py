@@ -361,6 +361,7 @@ def reformat_labels(val_labels, val_predicted_labels):
 
 
 def error_analysis(model_outputs, tagged_val_sentences):
+    top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': []}
     count = 0
     incorrectly_labeled_tokens = 0
     tokens = {}
@@ -377,16 +378,22 @@ def error_analysis(model_outputs, tagged_val_sentences):
                     tokens[token] += 1
                 except KeyError:
                     tokens[token] = 1
-                # if token in tokens:
-                #     tokens[token] += tokens[token]
-                # else:
-                #     tokens[token] = 1
-                # get the original raw text with the corresponding index
-                print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence: \n    {i, gold_sentence}\n")
-    print(f"{incorrectly_labeled_tokens} incorrectly labeled tokens.")
+                # get the original raw text with the corresponding index for the mislabed token
+                # Print only the top mislabeled
+                if token in top_errors:
+                    top_errors[token].append(tagged_to_sentence(gold_sentence))
+                    print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence: \n    {i, gold_sentence}\n")
+    print(f"{incorrectly_labeled_tokens} incorrectly labeled tokens, {len(tokens.items())} of which are unique.")
     # ranked_error_tokens = sorted(tokens, key=tokens.get, reverse=True)
     ranked_error_tokens = sorted(tokens.items(), key=lambda x: x[1], reverse=True)
     print(ranked_error_tokens)
+    # print(top_errors)
+
+
+def tagged_to_sentence(tagged_sentence):
+    tokens = [token for token, tag in tagged_sentence]
+    sentence = ' '.join(tokens)
+    return sentence
 
 
 
