@@ -361,9 +361,9 @@ def reformat_labels(val_labels, val_predicted_labels):
 
 
 def error_analysis(model_outputs, tagged_val_sentences):
-    top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': []}
+    top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': []}  #todo: defaultdict?
     count = 0
-    incorrectly_labeled_tokens = 0
+    incorrectly_labeled_token_occurrences = 0
     tokens = {}
     for i in range(len(model_outputs)):
         sentence = model_outputs[i]
@@ -372,7 +372,7 @@ def error_analysis(model_outputs, tagged_val_sentences):
             token, predicted_label = sentence[j]
             real_label = gold_sentence[j][1]
             if predicted_label != real_label:
-                incorrectly_labeled_tokens += 1
+                incorrectly_labeled_token_occurrences += 1
                 count += 1
                 try:
                     tokens[token] += 1
@@ -382,18 +382,38 @@ def error_analysis(model_outputs, tagged_val_sentences):
                 # Print only the top mislabeled
                 if token in top_errors:
                     top_errors[token].append(tagged_to_sentence(gold_sentence))
-                    print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence: \n    {i, gold_sentence}\n")
-    print(f"{incorrectly_labeled_tokens} incorrectly labeled tokens, {len(tokens.items())} of which are unique.")
+                    print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence {i}: \n    {tagged_to_sentence(gold_sentence)}\n")
+    print(f"{incorrectly_labeled_token_occurrences} incorrectly labeled tokens, {len(tokens.items())} of which are unique.")
     # ranked_error_tokens = sorted(tokens, key=tokens.get, reverse=True)
     ranked_error_tokens = sorted(tokens.items(), key=lambda x: x[1], reverse=True)
     print(ranked_error_tokens)
-    # print(top_errors)
 
 
 def tagged_to_sentence(tagged_sentence):
     tokens = [token for token, tag in tagged_sentence]
     sentence = ' '.join(tokens)
     return sentence
+
+
+def check_token_labeling(tagged_train, tagged_val, token):
+    print()
+    print()
+    print('___________________These are the validating-set sentences._____________________')
+    print()
+    print()
+    for sentence in tagged_val:
+        for word, tag in sentence:
+            if word == token:
+                print(sentence)
+    print()
+    print()
+    print('___________________These are the training-set sentences._______________________')
+    print()
+    print()
+    for sentence in tagged_train:
+        for word, tag in sentence:
+            if word == token:
+                print(sentence)
 
 
 
@@ -451,6 +471,8 @@ dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_tra
 # k_fold_validation(tagger, X_val, y_val)
 error_analysis(model_outputs, tagged_sents_val)
 # print(tagged_sents_val)
+check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
+check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
 
 
