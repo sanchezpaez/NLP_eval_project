@@ -235,7 +235,7 @@ def train_crf_suite(X_train, y_train, y_val):
     labels = list(tagger.classes_)
     y_pred = tagger.predict(X_val)
     accuracy = metrics_crf.flat_accuracy_score(y_val, y_pred)
-    print(f"Accuracy on the validation set with the crf_suite model: {accuracy}")
+    print(f"Accuracy on the validation set with the crf_suite (model B): {accuracy}")
     return accuracy, y_pred, labels
     # accuracy = metrics.make_scorer(metrics.accuracy_score(gold_tokens_val, predicted_token_labels))
     # # rs = RandomizedSearchCV(estimator=tagger, param_distributions=training_opt,
@@ -304,11 +304,11 @@ def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
     highest_accuracy = 0
     best_params = None
     results = []
-    training_opt = {"delta": [0.000010, 0.1], 'linesearch': ['MoreThuente', 'Backtracking', 'StrongBacktracking'],
+    training_opt = {"delta": [0.000010, 0.001, 0.1], 'linesearch': ['MoreThuente', 'Backtracking', 'StrongBacktracking'],
                     'c1': [0, 0.01, 0.1, 0.2], 'c2': [1, 0.01, 0.1, 0.2],
-                    'max_iterations': [5, 20, 10, 50],
+                    'max_iterations': [20, 10, 50, 100], 'feature.possible_transitions': [0, 1, 5, 10]
                     }
-    for i in range(10):
+    for i in range(20):
         start = timer()
         params = {key: random.sample(value, 1)[0] for key, value in training_opt.items()}
         # print(params)
@@ -325,6 +325,8 @@ def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
     df = pd.DataFrame(results, columns = ['Parameters', 'Accuracy', 'Time'])
     print(df)
     print(best_params)
+    print(f"Accuracy on the validation set with the best parameters for CRF (model A): {highest_accuracy}")
+
     return df, highest_accuracy, best_params
 
 
@@ -454,9 +456,9 @@ dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_tra
 # k_fold_validation(tagger, X_val, y_val)
 
 # Linguistic Error analysis
-error_analysis(model_outputs, tagged_sents_val)
-check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
-check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
+# error_analysis(model_outputs, tagged_sents_val)
+# check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
+# check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
 
 
