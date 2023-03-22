@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import scipy
 from matplotlib import pyplot as plt
+from sklearn.utils import shuffle
 from sklearn_crfsuite import CRF
 import sklearn_crfsuite
 from pathlib import Path
@@ -170,9 +171,13 @@ def transform_raw_data_into_matrix(train_tokens, train_labels, dev_tokens):
     return X_train, y, X_dev
 
 
-def train_model(tagged_train_sents, sentences_val, tagged_val_sents):
-    tagger = crf.CRFTagger()
-    tagger.train(tagged_train_sents, 'model.crf.tagger')
+def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
+    if model == 'crf':
+        tagger = crf.CRFTagger()
+        tagger.train(tagged_train_sents, 'model.crf.tagger')
+    elif model == 'hmm':
+        trainer = hmm.HiddenMarkovModelTrainer()
+        tagger = trainer.train_supervised(tagged_train_sents)
     model_outputs = tagger.tag_sents(sentences_val)
     print(f"Predicted tagged val sentence {model_outputs[0]}")
 
@@ -418,6 +423,40 @@ def check_token_labeling(tagged_train, tagged_val, token):
                 print(sentence)
 
 
+def t_statistic(eval_metric_a: float, eval_metric_b: float) -> float:
+    return eval_metric_a - eval_metric_b
+
+
+def paired_appr_randomization_test(outputs_a, outputs_b, gold,
+                                   rejection_level: float, R: int) -> (float, bool):
+    assert len(outputs_a) == len(outputs_b)
+    c = 0  # Set c = 0
+    acc_a = accuracy_score(gold, outputs_a)
+    acc_b = accuracy_score(gold, outputs_b)
+    actual_statistic = t_statistic(acc_a, acc_b)  # Compute actual statistic of score differences |SX − SY| on test data
+    for i in range(0, R):  # for all random shuffles r = 0,...,R do
+        # for all sentences in test set do
+        # Shuffle variable tuples between system X and Y with probability 0.5
+        shuffled_a, shuffled_b = shuffle(outputs_a, outputs_b)
+        # shuffled_a, shuffled_b = shuffle_arrays(outputs_a, outputs_b)
+        pseudo_stat = t_statistic(accuracy_score(gold, shuffled_a), accuracy_score(gold, shuffled_b))  # Compute pseudo-statistic |SXr − SYr | on shuffled data
+        if pseudo_stat >= actual_statistic:  # If |SXr − SYr |  >= |SX − SY|
+            c += 1
+    p_value = (c + 1) / (R + 1)
+    if p_value <= rejection_level:  # Reject null hypothesis if p is less than or equal to specified rejection level.
+        reject = True
+        print(f"The p-value is {p_value}, therefore smaller or equal than the rejection level of {rejection_level}, "
+              f"so we can reject the null hypotesis.")
+        print(f"The difference in  performance for models A and B is thus statistically significant.")
+    else:
+        reject = False
+        print(f"The p-value is {p_value}, therefore greater than the rejection level of {rejection_level}, "
+              f"so we fail to reject the null hypotesis.")
+        print(f"The difference in  performance for models A and B is thus not statistically significant.")
+
+    return p_value, reject
+
+
 
 # 1: EXTRACT AND REFORMAT DATA
 train_data, val_data, test_data = read_datasets('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
@@ -438,27 +477,33 @@ y_val = [sent2labels(s) for s in tagged_sents_val]
 # 2: TRAIN, EVALUATE, TUNE
 
 # Baselines: basic and advanced
-accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+# accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
+# accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
 
 # Train & evaluate model
 model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
-                                                                      tagged_sents_val)  # Accuracy on the validation set with crf.CRFTagger: 0.9793798916315473
+                                                                      tagged_sents_val, 'crf')  # Accuracy on the validation set with crf.CRFTagger: 0.9793798916315473
 print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
 ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-plt.grid(None)
-plt.show()
+# plt.grid(None)
+# plt.show()
 
 # Hyperparameter tuning
-accuracy, y_pred, labels = train_crf_suite(X_train, y_train, y_val) # Accuracy on the validation set with the crf_suite model: 0.9996989765201686
-# best_params = tune(X_train, y_train)
-dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
-# k_fold_validation(tagger, X_val, y_val)
+# best_params = tune(X_train, y_train) NOOOOOO
+# dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
+# k_fold_validation(tagger, X_val, y_val) NOOOOOOO
 
 # Linguistic Error analysis
 # error_analysis(model_outputs, tagged_sents_val)
 # check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
 # check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
+
+# Performance evaluation: statistical significance testing
+accuracy_model_b, pred_b, labels = train_crf_suite(X_train, y_train, y_val) # Accuracy on the validation set with the crf_suite model: 0.9996989765201686
+model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
+                                                                      tagged_sents_val, 'hmm')
+# test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
+paired_appr_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)
 
 
 
