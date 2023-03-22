@@ -147,7 +147,7 @@ def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
         multiclass_predictions = classifier.predict(tokens_val)
         multiclass_imbalanc_probs = classifier.predict_proba(tokens_val)
         accuracy = classifier.score(tokens_val, gold_val)
-        print(f'Accuracy on the val set with strategy {strategy}: {accuracy}')
+        print(f'Accuracy on the val set with baseline strategy {strategy}: {accuracy}')
     elif strategy == 'mlp':
         classifier = MLPClassifier(verbose=True)
         X_train, y_train, X_val = transform_raw_data_into_matrix(tokens_train, gold_train, tokens_val)
@@ -155,7 +155,7 @@ def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
         multiclass_predictions = classifier.predict(X_val)
         multiclass_imbalanc_probs = classifier.predict_proba(X_val)
         accuracy = classifier.score(X_val, gold_val)
-        print(f'Accuracy on the val set with strategy {strategy}: {accuracy}')
+        print(f'Accuracy on the val set with baseline strategy {strategy}: {accuracy}')
 
     return accuracy
 
@@ -177,7 +177,7 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents):
     print(f"Predicted tagged val sentence {model_outputs[0]}")
 
     accuracy = tagger.evaluate(tagged_val_sents)
-    print(f"Accuracy on the validation set with {str(tagger)}:", accuracy)  # 0.9793798916315473
+    print(f"Accuracy on the validation set with crf.CRFTagger: {accuracy}")  # 0.9793798916315473
     predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
     # predicted_labels = [[tag for token, tag in sent] for sent in model_outputs] # for sentence accuracy, but it does not work
 
@@ -225,7 +225,7 @@ def tune_hyperparameters(tagged_trainset, sents_valset, tagged_valset, sents_tra
     # print(best_params)
 
 
-def get_best_parameters(X_train, y_train, y_val, is_tuned):
+def train_crf_suite(X_train, y_train, y_val):
     tagger = sklearn_crfsuite.CRF(
         algorithm='lbfgs',
         max_iterations=100,
@@ -235,7 +235,7 @@ def get_best_parameters(X_train, y_train, y_val, is_tuned):
     labels = list(tagger.classes_)
     y_pred = tagger.predict(X_val)
     accuracy = metrics_crf.flat_accuracy_score(y_val, y_pred)
-    print(accuracy)
+    print(f"Accuracy on the validation set with the crf_suite model: {accuracy}")
     return accuracy, y_pred, labels
     # accuracy = metrics.make_scorer(metrics.accuracy_score(gold_tokens_val, predicted_token_labels))
     # # rs = RandomizedSearchCV(estimator=tagger, param_distributions=training_opt,
@@ -420,57 +420,41 @@ def check_token_labeling(tagged_train, tagged_val, token):
 # 1: EXTRACT AND REFORMAT DATA
 train_data, val_data, test_data = read_datasets('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
                                                 'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')
-# print(train_data[0])
-# print(train_data[0][0])
 tagged_sents_train, tagged_sents_val, tagged_sents_test = tag_datasets(train_data, val_data, test_data)
-# print(f"Tagged sentences train {tagged_sents_train[0]}")
 sentences_train, sentences_val, sentences_test = get_sentences_from_datasets(train_data, val_data, test_data)
 tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(sentences_train, sentences_val, sentences_test)
 gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(tagged_sents_train,
                                                                                                              tagged_sents_val,
                                                                                                              tagged_sents_test)
 gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
-# print(sent2features(tagged_sents_train[0])[0])
+
 X_train = [sent2features(s) for s in tagged_sents_train]
 y_train = [sent2labels(s) for s in tagged_sents_train]
 X_val = [sent2features(s) for s in tagged_sents_val]
 y_val = [sent2labels(s) for s in tagged_sents_val]
-# print(X_train[0])
-# print(y_train[0])
+
 # 2: TRAIN, EVALUATE, TUNE
 
 # Baselines: basic and advanced
-# accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, sentences_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-# accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, sentences_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
+accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
 
 # Train & evaluate model
 model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
-                                                                      tagged_sents_val)  # Accuracy on the validation set: 0.9793798916315473
+                                                                      tagged_sents_val)  # Accuracy on the validation set with crf.CRFTagger: 0.9793798916315473
 print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
-
-# Hyperparameter tuning
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.9759181216134859 'feature.minfreq' : 10
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.9759181216134859 {'feature.minfreq': 10, "num_memories": 500, "delta": 1e-8}
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.9775737507525587 {'feature.minfreq': 10, "num_memories": 500, "delta": 1e-8, 'linesearch': 'StrongBacktracking',
-# 'c1': 0.1, 'c2': 0.1, 'max_iterations': 20}
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.9798314268512944 {'feature.minfreq': 10, "num_memories": 500, "delta": 1e-8, 'linesearch': 'StrongBacktracking',
-# 'c1': 0.1, 'c2': 0.1, 'max_iterations': 20}
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.9802829620710415 {'feature.minfreq': 10, "num_memories": 500, "delta": 1e-8, 'linesearch': 'StrongBacktracking',
-#                     # 'c1': 0.01, 'c2': 0.01, 'max_iterations': 50, 'feature.possible_transitions': True}
-# model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train, sentences_val, tagged_sents_val)  # Accuracy on the validation set: 0.7987658037326911 {'feature.minfreq': 10, "num_memories": 500, "delta": 1e-8, 'linesearch': 'StrongBacktracking',
-# 'c1': 200, 'c2': 0.01, 'max_iterations': 50, 'feature.possible_transitions': True}
-model_outputs, tagger, accuracy, predicted_token_labels = tune_hyperparameters(tagged_sents_train,
-                                                                                                sentences_val, tagged_sents_val,
-                                                                                                sentences_train)  # Accuracy on the validation set:
 ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
 plt.grid(None)
 plt.show()
-# accuracy, y_pred, labels = get_best_parameters(X_train, y_train, y_val, is_tuned=False) # 0.9996989765201686
+
+# Hyperparameter tuning
+accuracy, y_pred, labels = train_crf_suite(X_train, y_train, y_val) # Accuracy on the validation set with the crf_suite model: 0.9996989765201686
 # best_params = tune(X_train, y_train)
 dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
 # k_fold_validation(tagger, X_val, y_val)
+
+# Linguistic Error analysis
 error_analysis(model_outputs, tagged_sents_val)
-# print(tagged_sents_val)
 check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
 check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
