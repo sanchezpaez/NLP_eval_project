@@ -75,6 +75,10 @@ def get_tokens_from_sentences(sent_train, sent_val, sent_test):
     tokens_train = [token for sentence in sent_train for token in sentence]
     tokens_val = [token for sentence in sent_val for token in sentence]
     tokens_test = [token for sentence in sent_test for token in sentence]
+
+    print(f"There are {len(tokens_train)} words/tokens in the training set.")
+    print(f"There are {len(tokens_val)} words/tokens in the validating set.")
+    print(f"There are {len(tokens_test)} words/tokens in the test set.")
     return tokens_train, tokens_val, tokens_test
 
 
@@ -148,7 +152,7 @@ def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
         multiclass_predictions = classifier.predict(tokens_val)
         multiclass_imbalanc_probs = classifier.predict_proba(tokens_val)
         accuracy = classifier.score(tokens_val, gold_val)
-        print(f'Accuracy on the val set with baseline strategy {strategy}: {accuracy}')
+        print(f'Accuracy on the val set with baseline A strategy {strategy}: {accuracy}')
     elif strategy == 'mlp':
         classifier = MLPClassifier(verbose=True)
         X_train, y_train, X_val = transform_raw_data_into_matrix(tokens_train, gold_train, tokens_val)
@@ -156,7 +160,7 @@ def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
         multiclass_predictions = classifier.predict(X_val)
         multiclass_imbalanc_probs = classifier.predict_proba(X_val)
         accuracy = classifier.score(X_val, gold_val)
-        print(f'Accuracy on the val set with baseline strategy {strategy}: {accuracy}')
+        print(f'Accuracy on the val set with baseline B strategy {strategy}: {accuracy}')
 
     return accuracy
 
@@ -173,18 +177,18 @@ def transform_raw_data_into_matrix(train_tokens, train_labels, dev_tokens):
 
 def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
     if model == 'crf':
+        type = 'A'
         tagger = crf.CRFTagger()
         tagger.train(tagged_train_sents, 'model.crf.tagger')
     elif model == 'hmm':
+        type = 'B'
         trainer = hmm.HiddenMarkovModelTrainer()
         tagger = trainer.train_supervised(tagged_train_sents)
     model_outputs = tagger.tag_sents(sentences_val)
-    print(f"Predicted tagged val sentence {model_outputs[0]}")
-
+    print(f"This is an example of a sentence tagged by the model {model}: \n {model_outputs[0]}")
     accuracy = tagger.evaluate(tagged_val_sents)
-    print(f"Accuracy on the validation set with {model} model: {accuracy}")  # 0.9793798916315473
+    print(f"Accuracy on the validation set with {model}, model {type} : {accuracy}")
     predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
-    # predicted_labels = [[tag for token, tag in sent] for sent in model_outputs] # for sentence accuracy, but it does not work
 
     return model_outputs, tagger, accuracy, predicted_labels
 
@@ -230,7 +234,7 @@ def tune_hyperparameters(tagged_trainset, sents_valset, tagged_valset, sents_tra
     # print(best_params)
 
 
-def train_crf_suite(X_train, y_train, y_val):
+def train_crf_suite(X_train, X_val, y_train, y_val):
     tagger = sklearn_crfsuite.CRF(
         algorithm='lbfgs',
         max_iterations=100,
@@ -461,41 +465,59 @@ def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, t
                                                     val_set_file, test_set_file)
     tagged_sents_train, tagged_sents_val, tagged_sents_test = tag_datasets(train_data, val_data, test_data)
     sentences_train, sentences_val, sentences_test = get_sentences_from_datasets(train_data, val_data, test_data)
+    if 'English-Atis' in directory_name:
+        print("The dataset Atis, (English) is composed of:")
+    elif 'Spanish-AnCora' in directory_name:
+        print("The dataset AnCora, (Spanish) is composed of:")
+    else:
+        print('The dataset is composed of:')
+    print(f"{len(tagged_sents_train)} sentences for the training set.")
+    print(f"{len(tagged_sents_val)} sentences for the validating set.")
+    print(f"{len(tagged_sents_test)} sentences for the test set.")
 
     return tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test
 
 
-# 1: EXTRACT AND REFORMAT DATA
-tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
-                                                    'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')
-tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(sentences_train, sentences_val, sentences_test)
-gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(tagged_sents_train,
-                                                                                                                 tagged_sents_val,
-                                                                                                                 tagged_sents_test)
-gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
+def get_x_and_y_features(tagged_sents_train, tagged_sents_val):
+    X_train = [sent2features(s) for s in tagged_sents_train]
+    y_train = [sent2labels(s) for s in tagged_sents_train]
+    X_val = [sent2features(s) for s in tagged_sents_val]
+    y_val = [sent2labels(s) for s in tagged_sents_val]
 
-X_train = [sent2features(s) for s in tagged_sents_train]
-y_train = [sent2labels(s) for s in tagged_sents_train]
-X_val = [sent2features(s) for s in tagged_sents_val]
-y_val = [sent2labels(s) for s in tagged_sents_val]
+    return X_train, y_train, X_val, y_val
+
+
+# 1: EXTRACT AND REFORMAT DATA
+tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
+    extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
+                              'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')  # 4274 training set, 572 validating set, 586  test
+tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
+    sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
+gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
+    tagged_sents_train, tagged_sents_val, tagged_sents_test)
+gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(
+    gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
+
+# X_train, y_train, X_val, y_val = get_x_and_y_features(tagged_sents_train, tagged_sents_val)
 
 # 2: TRAIN, EVALUATE, TUNE
 
 # Baselines: basic and advanced
-# accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-# accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
+accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
 
 # Train & evaluate model
 model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
                                                                       tagged_sents_val, 'crf')  # Accuracy on the validation set with crf.CRFTagger: 0.9793798916315473
 print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
 ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-# plt.grid(None)
-# plt.show()
+plt.grid(None)
+plt.savefig("confusion_matrix.png")
+plt.show()
 
 # Hyperparameter tuning
 # best_params = tune(X_train, y_train) NOOOOOO
-# dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)
+dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)  # 0.9850993377483444
 # k_fold_validation(tagger, X_val, y_val) NOOOOOOO
 
 # Linguistic Error analysis
@@ -504,19 +526,17 @@ ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels,
 # check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
 # Performance evaluation: statistical significance testing
-accuracy_model_b, pred_b, labels = train_crf_suite(X_train, y_train, y_val)
+# accuracy_model_b, pred_b, labels = train_crf_suite(X_train, X_val, y_train, y_val)  # Nooooo
 model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
-                                                                      tagged_sents_val, 'hmm')
+                                                                      tagged_sents_val, 'hmm')  # 0.9528898254063817
 # test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
 paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # Reject = True
-
-
 
 ##########################
 
 # Now try with a dataset in Spanish, that is much larger
 tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2, sentences_train_s2, sentences_val_s2, sentences_test_s2 = extract_and_reformat_data(
-    'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')
+    'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')  # 14287 training sents, 1654 val, 1721 test
 gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2 = get_sentence_gold_labels_from_datasets(
     tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2)
 gold_tokens_train_s2, gold_tokens_val_s2, gold_tokens_test_s2 = get_token_gold_labels(
@@ -527,4 +547,5 @@ model_outputs_s2, tagger_s2, accuracy_s2, predicted_token_labels_s2 = train_mode
 # Performance evaluation: statistical significance testing
 model_outputs_b_s2, tagger_b_s2, accuracy_b_s2, predicted_token_labels_b_s2 = train_model(
     tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'hmm')  # Accuracy on the validation set with hmm: 0.5158609999639523
-paired_randomization_test(predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)
+paired_randomization_test(
+    predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)  # Reject = True
