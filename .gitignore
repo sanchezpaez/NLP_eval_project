@@ -1,3 +1,4 @@
 .DS_Store
 .idea/
 model.crf.tagger
+confusion_matrix.png
