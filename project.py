@@ -19,7 +19,7 @@ from nltk.tag import hmm, crf, perceptron
 from sklearn import metrics
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import make_scorer, accuracy_score, ConfusionMatrixDisplay
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_validate
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_validate, permutation_test_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn_crfsuite import metrics as metrics_crf
@@ -182,7 +182,7 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
     print(f"Predicted tagged val sentence {model_outputs[0]}")
 
     accuracy = tagger.evaluate(tagged_val_sents)
-    print(f"Accuracy on the validation set with crf.CRFTagger: {accuracy}")  # 0.9793798916315473
+    print(f"Accuracy on the validation set with {model} model: {accuracy}")  # 0.9793798916315473
     predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
     # predicted_labels = [[tag for token, tag in sent] for sent in model_outputs] # for sentence accuracy, but it does not work
 
@@ -427,8 +427,8 @@ def t_statistic(eval_metric_a: float, eval_metric_b: float) -> float:
     return eval_metric_a - eval_metric_b
 
 
-def paired_appr_randomization_test(outputs_a, outputs_b, gold,
-                                   rejection_level: float, R: int) -> (float, bool):
+def paired_randomization_test(outputs_a, outputs_b, gold,
+                              rejection_level: float, R: int) -> (float, bool):
     assert len(outputs_a) == len(outputs_b)
     c = 0  # Set c = 0
     acc_a = accuracy_score(gold, outputs_a)
@@ -438,9 +438,8 @@ def paired_appr_randomization_test(outputs_a, outputs_b, gold,
         # for all sentences in test set do
         # Shuffle variable tuples between system X and Y with probability 0.5
         shuffled_a, shuffled_b = shuffle(outputs_a, outputs_b)
-        # shuffled_a, shuffled_b = shuffle_arrays(outputs_a, outputs_b)
         pseudo_stat = t_statistic(accuracy_score(gold, shuffled_a), accuracy_score(gold, shuffled_b))  # Compute pseudo-statistic |SXr − SYr | on shuffled data
-        if pseudo_stat >= actual_statistic:  # If |SXr − SYr |  >= |SX − SY|
+        if pseudo_stat >= actual_statistic:  # If |SXr − SYr | >= |SX − SY|
             c += 1
     p_value = (c + 1) / (R + 1)
     if p_value <= rejection_level:  # Reject null hypothesis if p is less than or equal to specified rejection level.
@@ -457,16 +456,22 @@ def paired_appr_randomization_test(outputs_a, outputs_b, gold,
     return p_value, reject
 
 
+def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, test_set_file):
+    train_data, val_data, test_data = read_datasets(directory_name, train_setset_file,
+                                                    val_set_file, test_set_file)
+    tagged_sents_train, tagged_sents_val, tagged_sents_test = tag_datasets(train_data, val_data, test_data)
+    sentences_train, sentences_val, sentences_test = get_sentences_from_datasets(train_data, val_data, test_data)
+
+    return tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test
+
 
 # 1: EXTRACT AND REFORMAT DATA
-train_data, val_data, test_data = read_datasets('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
-                                                'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')
-tagged_sents_train, tagged_sents_val, tagged_sents_test = tag_datasets(train_data, val_data, test_data)
-sentences_train, sentences_val, sentences_test = get_sentences_from_datasets(train_data, val_data, test_data)
+tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
+                                                    'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')
 tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(sentences_train, sentences_val, sentences_test)
 gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(tagged_sents_train,
-                                                                                                             tagged_sents_val,
-                                                                                                             tagged_sents_test)
+                                                                                                                 tagged_sents_val,
+                                                                                                                 tagged_sents_test)
 gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
 
 X_train = [sent2features(s) for s in tagged_sents_train]
@@ -499,18 +504,27 @@ ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels,
 # check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
 # Performance evaluation: statistical significance testing
-accuracy_model_b, pred_b, labels = train_crf_suite(X_train, y_train, y_val) # Accuracy on the validation set with the crf_suite model: 0.9996989765201686
+accuracy_model_b, pred_b, labels = train_crf_suite(X_train, y_train, y_val)
 model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
                                                                       tagged_sents_val, 'hmm')
 # test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
-paired_appr_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)
-
+paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # Reject = True
 
 
 
 ##########################
 
 # Now try with a dataset in Spanish, that is much larger
-
-# train_data, val_data, test_data = read_datasets('UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')
-
+tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2, sentences_train_s2, sentences_val_s2, sentences_test_s2 = extract_and_reformat_data(
+    'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')
+gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2 = get_sentence_gold_labels_from_datasets(
+    tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2)
+gold_tokens_train_s2, gold_tokens_val_s2, gold_tokens_test_s2 = get_token_gold_labels(
+    gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2)
+# Train & evaluate model
+model_outputs_s2, tagger_s2, accuracy_s2, predicted_token_labels_s2 = train_model(
+    tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'crf')  # Accuracy on the validation set with crf.CRFTagger: 0.9697018852961321
+# Performance evaluation: statistical significance testing
+model_outputs_b_s2, tagger_b_s2, accuracy_b_s2, predicted_token_labels_b_s2 = train_model(
+    tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'hmm')  # Accuracy on the validation set with hmm: 0.5158609999639523
+paired_randomization_test(predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)
