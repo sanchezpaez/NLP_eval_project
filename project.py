@@ -1,5 +1,6 @@
 # Sandra Sanchez
 # NLP Eval project
+import pickle
 import random
 from collections import Counter
 
@@ -23,9 +24,12 @@ from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_vali
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn_crfsuite import metrics as metrics_crf
+from tqdm import tqdm
 from yellowbrick.model_selection import CVScores
 from sklearn.model_selection import KFold
 from sklearn.model_selection import cross_val_score
+
+SEED = 10
 
 
 def read_datasets(corpus_dirname, train_filename, dev_filename, test_filename):
@@ -89,62 +93,6 @@ def get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sen
     return gold_tokens_train, gold_tokens_val, gold_tokens_test
 
 
-def word2features(sent, i):
-    word = sent[i][0]
-    postag = sent[i][1]
-
-    features = {
-        'bias': 1.0,
-        'word.lower()': word.lower(),
-        'word[-3:]': word[-3:],
-        'word[-2:]': word[-2:],
-        'word.isupper()': word.isupper(),
-        'word.istitle()': word.istitle(),
-        'word.isdigit()': word.isdigit(),
-        'postag': postag,
-        'postag[:2]': postag[:2],
-    }
-    if i > 0:
-        word1 = sent[i-1][0]
-        postag1 = sent[i-1][1]
-        features.update({
-            '-1:word.lower()': word1.lower(),
-            '-1:word.istitle()': word1.istitle(),
-            '-1:word.isupper()': word1.isupper(),
-            '-1:postag': postag1,
-            '-1:postag[:2]': postag1[:2],
-        })
-    else:
-        features['BOS'] = True
-
-    if i < len(sent)-1:
-        word1 = sent[i+1][0]
-        postag1 = sent[i+1][1]
-        features.update({
-            '+1:word.lower()': word1.lower(),
-            '+1:word.istitle()': word1.istitle(),
-            '+1:word.isupper()': word1.isupper(),
-            '+1:postag': postag1,
-            '+1:postag[:2]': postag1[:2],
-        })
-    else:
-        features['EOS'] = True
-
-    return features
-
-
-def sent2features(sent):
-    return [word2features(sent, i) for i in range(len(sent))]
-
-
-def sent2labels(sent):
-    return [label for token, label in sent]
-
-
-def sent2tokens(sent):
-    return [token for token, label in sent]
-
-
 def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
     if strategy == 'most_frequent':
         classifier = DummyClassifier(strategy='most_frequent')
@@ -176,11 +124,20 @@ def transform_raw_data_into_matrix(train_tokens, train_labels, dev_tokens):
 
 
 def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
+    print('Training model...')
     if model == 'crf':
         type = 'A'
-        tagger = crf.CRFTagger()
+        tagger = crf.CRFTagger(feature_func=sent2features)
         tagger.train(tagged_train_sents, 'model.crf.tagger')
+    elif model == 'crf_es':
+        type = 'A'
+        tagger = crf.CRFTagger()
+        tagger.train(tagged_train_sents, 'model.crf_es.tagger')
     elif model == 'hmm':
+        type = 'B'
+        trainer = hmm.HiddenMarkovModelTrainer()
+        tagger = trainer.train_supervised(tagged_train_sents)
+    elif model == 'hmm_es':
         type = 'B'
         trainer = hmm.HiddenMarkovModelTrainer()
         tagger = trainer.train_supervised(tagged_train_sents)
@@ -309,7 +266,8 @@ def tune(X_train, y_train):
     return rs.best_params_
 
 
-def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
+def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val, set):
+    print('Performing hyperparameter tuning...')
     highest_accuracy = 0
     best_params = None
     results = []
@@ -317,12 +275,15 @@ def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
                     'c1': [0, 0.01, 0.1, 0.2], 'c2': [1, 0.01, 0.1, 0.2],
                     'max_iterations': [20, 10, 50, 100], 'feature.possible_transitions': [0, 1, 5, 10]
                     }
-    for i in range(20):
+    for i in tqdm(range(20)):
         start = timer()
         params = {key: random.sample(value, 1)[0] for key, value in training_opt.items()}
         # print(params)
         tagger = crf.CRFTagger(training_opt=params)
-        tagger.train(tagged_train_sents, 'model.crf.tagger')
+        if set == 'en':
+            tagger.train(tagged_train_sents, 'model.crf_tuned.tagger')
+        elif set == 'spa':
+            tagger.train(tagged_train_sents, 'model.crf_es_tuned.tagger')
         model_outputs = tagger.tag_sents(sentences_val)
         accuracy = tagger.evaluate(tagged_val_sents)
         if accuracy > highest_accuracy:
@@ -332,6 +293,12 @@ def tune_hyper_manually(tagged_train_sents, tagged_val_sents, sentences_val):
         results_list = params, accuracy, end - start
         results.append(results_list)
     df = pd.DataFrame(results, columns = ['Parameters', 'Accuracy', 'Time'])
+    if set == 'en':
+        df.to_csv('results_tuning_en.csv')
+        save_data(best_params, 'best_params_en.pkl')
+    elif set == 'spa':
+        df.to_csv('results_tuning_spa.csv')
+        save_data(best_params, 'best_params_spa.pkl')
     print(df)
     print(best_params)
     print(f"Accuracy on the validation set with the best parameters for CRF (model A): {highest_accuracy}")
@@ -372,7 +339,8 @@ def reformat_labels(val_labels, val_predicted_labels):
 
 
 def error_analysis(model_outputs, tagged_val_sentences):
-    top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': []}  #todo: defaultdict?
+    top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': [],
+                  'que': [], 'como': [], 'la': [], 'cuando': [], 'mientras': []}  #todo: defaultdict?
     count = 0
     incorrectly_labeled_token_occurrences = 0
     tokens = {}
@@ -395,15 +363,24 @@ def error_analysis(model_outputs, tagged_val_sentences):
                     top_errors[token].append(tagged_to_sentence(gold_sentence))
                     print(f"{count} Incorrect predicted label '{predicted_label}' at token '{j, token}' in sentence {i}: \n    {tagged_to_sentence(gold_sentence)}\n")
     print(f"{incorrectly_labeled_token_occurrences} incorrectly labeled tokens, {len(tokens.items())} of which are unique.")
-    # ranked_error_tokens = sorted(tokens, key=tokens.get, reverse=True)
     ranked_error_tokens = sorted(tokens.items(), key=lambda x: x[1], reverse=True)
-    print(ranked_error_tokens)
+    print()
+    print('These are the top 5 mislabeled tokens:')
+    for token, occurrence in ranked_error_tokens[:5]:
+        print(f"'{token}': {occurrence} times.")
 
 
 def tagged_to_sentence(tagged_sentence):
     tokens = [token for token, tag in tagged_sentence]
     sentence = ' '.join(tokens)
     return sentence
+
+
+def get_previous_n_posterior_word(sentence, token):
+    for i in range(len(sentence)):
+        word = sentence[i]
+        if word[0] == token:
+            print(sentence[i - 1], word, sentence[i + 1])
 
 
 def check_token_labeling(tagged_train, tagged_val, token):
@@ -413,18 +390,15 @@ def check_token_labeling(tagged_train, tagged_val, token):
     print()
     print()
     for sentence in tagged_val:
-        for word, tag in sentence:
-            if word == token:
-                print(sentence)
+        get_previous_n_posterior_word(sentence, token)
+
     print()
     print()
     print('___________________These are the training-set sentences._______________________')
     print()
     print()
     for sentence in tagged_train:
-        for word, tag in sentence:
-            if word == token:
-                print(sentence)
+        get_previous_n_posterior_word(sentence, token)
 
 
 def t_statistic(eval_metric_a: float, eval_metric_b: float) -> float:
@@ -450,7 +424,7 @@ def paired_randomization_test(outputs_a, outputs_b, gold,
         reject = True
         print(f"The p-value is {p_value}, therefore smaller or equal than the rejection level of {rejection_level}, "
               f"so we can reject the null hypotesis.")
-        print(f"The difference in  performance for models A and B is thus statistically significant.")
+        print(f"The difference in  performance for models A and B is thus statistically significant for this sample.")
     else:
         reject = False
         print(f"The p-value is {p_value}, therefore greater than the rejection level of {rejection_level}, "
@@ -487,37 +461,126 @@ def get_x_and_y_features(tagged_sents_train, tagged_sents_val):
     return X_train, y_train, X_val, y_val
 
 
-# 1: EXTRACT AND REFORMAT DATA
-tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
-    extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
-                              'en_atis-ud-dev.conllu', 'en_atis-ud-test.conllu')  # 4274 training set, 572 validating set, 586  test
-tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
-    sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
-gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
-    tagged_sents_train, tagged_sents_val, tagged_sents_test)
-gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(
-    gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
+def save_data(data: any, filename: any) -> None:
+    """Save data into file_name (.pkl file)to save time."""
+    with open(filename, mode="wb") as file:
+        pickle.dump(data, file)
+        print(f'Data saved in {filename}')
 
-# X_train, y_train, X_val, y_val = get_x_and_y_features(tagged_sents_train, tagged_sents_val)
 
-# 2: TRAIN, EVALUATE, TUNE
+def load_data(filename: any) -> any:
+    """Load pre-saved data."""
+    with open(filename, "rb") as file:
+        output = pickle.load(file)
+    print(f'Loading  data  pre-saved as {filename}...')
+    return output
 
-# Baselines: basic and advanced
-accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+
+def word2features(sent, i):
+    features = []
+    word = sent[i]
+    print(word)
+
+    # features = {
+    #     'bias': 1.0,
+    #     'word.lower()': word.lower(),
+    #     'word[-3:]': word[-3:],
+    #     'word[-2:]': word[-2:],
+    #     'word.isupper()': word.isupper(),
+    #     'word.istitle()': word.istitle(),
+    #     'word.isdigit()': word.isdigit(),
+    #     'postag': postag,
+    #     'postag[:2]': postag[:2],
+    # }
+    # if i > 0:
+    #     word1 = sent[i-1][0]
+    #     postag1 = sent[i-1][1]
+    #     features.update({
+    #         '-1:word.lower()': word1.lower(),
+    #         '-1:word.istitle()': word1.istitle(),
+    #         '-1:word.isupper()': word1.isupper(),
+    #         '-1:postag': postag1,
+    #         '-1:postag[:2]': postag1[:2],
+    #     })
+    # else:
+    #     features['BOS'] = True
+    #
+    # if i < len(sent)-1:
+    #     word1 = sent[i+1][0]
+    #     postag1 = sent[i+1][1]
+    #     features.update({
+    #         '+1:word.lower()': word1.lower(),
+    #         '+1:word.istitle()': word1.istitle(),
+    #         '+1:word.isupper()': word1.isupper(),
+    #         '+1:postag': postag1,
+    #         '+1:postag[:2]': postag1[:2],
+    #     })
+    # else:
+    #     features['EOS'] = True
+    word1 = sent[i-1]
+    postag1 = sent[i-1]
+    features.append(word.lower())
+    # features.append(word.istitle())
+    # features.append(word.isupper())
+    features = [f.encode('utf-8') for f in features]
+
+
+    return features
+
+
+def sent2features(sent, index):
+    return word2features(sent, index)
+
+
+def sent2labels(sent):
+    return [label for token, label in sent]
+
+
+def sent2tokens(sent):
+    return [token for token, label in sent]
+
+
 
 # Train & evaluate model
-model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
-                                                                      tagged_sents_val, 'crf')  # Accuracy on the validation set with crf.CRFTagger: 0.9793798916315473
-print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
-ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-plt.grid(None)
-plt.savefig("confusion_matrix.png")
-plt.show()
+if __name__=='__main__':
+    # 1: EXTRACT AND REFORMAT DATA
+    tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
+        extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
+                                  'en_atis-ud-dev.conllu',
+                                  'en_atis-ud-test.conllu')  # 4274 training set, 572 validating set, 586  test
+    first_sents = tagged_sents_train[:2]
+    print(first_sents)
+    features = []
+    for sent in first_sents:
+        tokens, labels = zip(*sent)
+        feat = [sent2features(tokens, i) for i in range(len(tokens))]
+        features.append(feat)
+    print(features)
+    # tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
+    #     sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
+    # gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
+    #     tagged_sents_train, tagged_sents_val, tagged_sents_test)
+    # gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(
+    #     gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
+
+    # X_train, y_train, X_val, y_val = get_x_and_y_features(tagged_sents_train, tagged_sents_val)
+
+    # 2: TRAIN, EVALUATE, TUNE
+
+    # Baselines: basic and advanced
+    # accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
+    # accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+    model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
+                                                                          tagged_sents_val, 'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473
+    # print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
+    # ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
+    # plt.grid(None)
+    # plt.savefig("confusion_matrix.png")
+    # plt.show()
 
 # Hyperparameter tuning
 # best_params = tune(X_train, y_train) NOOOOOO
-dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)  # 0.9850993377483444
+# dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)  # 0.9850993377483444
 # k_fold_validation(tagger, X_val, y_val) NOOOOOOO
 
 # Linguistic Error analysis
@@ -527,25 +590,56 @@ dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_tra
 
 # Performance evaluation: statistical significance testing
 # accuracy_model_b, pred_b, labels = train_crf_suite(X_train, X_val, y_train, y_val)  # Nooooo
-model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
-                                                                      tagged_sents_val, 'hmm')  # 0.9528898254063817
+# model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
+#                                                                       tagged_sents_val, 'hmm')  # 0.9528898254063817
 # test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
-paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # Reject = True
+# paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # Reject = True
 
 ##########################
 
 # Now try with a dataset in Spanish, that is much larger
-tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2, sentences_train_s2, sentences_val_s2, sentences_test_s2 = extract_and_reformat_data(
-    'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')  # 14287 training sents, 1654 val, 1721 test
-gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2 = get_sentence_gold_labels_from_datasets(
-    tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2)
-gold_tokens_train_s2, gold_tokens_val_s2, gold_tokens_test_s2 = get_token_gold_labels(
-    gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2)
-# Train & evaluate model
-model_outputs_s2, tagger_s2, accuracy_s2, predicted_token_labels_s2 = train_model(
-    tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'crf')  # Accuracy on the validation set with crf.CRFTagger: 0.9697018852961321
-# Performance evaluation: statistical significance testing
-model_outputs_b_s2, tagger_b_s2, accuracy_b_s2, predicted_token_labels_b_s2 = train_model(
-    tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'hmm')  # Accuracy on the validation set with hmm: 0.5158609999639523
-paired_randomization_test(
-    predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)  # Reject = True
+
+# 1: EXTRACT AND REFORMAT DATA
+
+# tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2, sentences_train_s2, sentences_val_s2, sentences_test_s2 = extract_and_reformat_data(
+#     'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')  # 14287 training sents, 1654 val, 1721 test
+# tokens_train_s2, tokens_val_s2, tokens_test_s2 = get_tokens_from_sentences(
+#     sentences_train_s2, sentences_val_s2, sentences_test_s2)  # 469366, 55482, 55603
+# gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2 = get_sentence_gold_labels_from_datasets(
+#     tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2)
+# gold_tokens_train_s2, gold_tokens_val_s2, gold_tokens_test_s2 = get_token_gold_labels(
+#     gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2)
+
+# 2: TRAIN, EVALUATE, TUNE
+
+# Baselines: basic and advanced
+# accuracy_most_frequent = train_baseline(tokens_train_s2, gold_tokens_train_s2, tokens_val_s2, gold_tokens_val_s2, 'most_frequent')  # 0.17295699506146137
+# accuracy_mlp = train_baseline(tokens_train_s2, gold_tokens_train_s2, tokens_val_s2, gold_tokens_val_s2, 'mlp')  # Accuracy on the val set with baseline B strategy mlp: 0.8396957571825097
+
+# # Train & evaluate model
+# model_outputs_s2, tagger_s2, accuracy_s2, predicted_token_labels_s2 = train_model(
+#     tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'crf_es')  # Accuracy on the validation set with crf.CRFTagger: 0.9697018852961321
+# print(metrics.classification_report(gold_tokens_val_s2, predicted_token_labels_s2, zero_division=0))
+# save_data(predicted_token_labels_s2, 'predicted_token_labels_s2.pkl')
+# save_data(model_outputs_s2, 'model_outputs_s2.pkl')
+
+# ConfusionMatrixDisplay.from_predictions(gold_tokens_val_s2, predicted_token_labels_s2, xticks_rotation='vertical')
+# plt.grid(None)
+# plt.savefig("confusion_matrix_spa.png")
+# plt.show()
+
+# dataframe, best_accuracy, best_parameters = tune_hyper_manually(
+#     tagged_sents_train_s2, tagged_sents_val_s2, gold_sent_labels_val_s2, 'spa')  # Accuracy on the validation set with the best parameters for CRF (model A): 0.9771457409610325
+
+# Linguistic Error analysis
+# error_analysis(model_outputs_s2, tagged_sents_val_s2)
+## 1681 incorrectly labeled tokens, 1135 of which are unique.
+## Top mislabeled: que, como, la, cuando, mientras
+# check_token_labeling(tagged_sents_train_s2, tagged_sents_val_s2, 'que')
+# check_token_labeling(tagged_sents_train_s2, tagged_sents_val_s2, 'como')
+
+# # Performance evaluation: statistical significance testing
+# model_outputs_b_s2, tagger_b_s2, accuracy_b_s2, predicted_token_labels_b_s2 = train_model(
+#     tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'hmm')  # Accuracy on the validation set with hmm: 0.5158609999639523
+# paired_randomization_test(
+#     predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)  # Reject = True

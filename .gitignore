@@ -2,3 +2,6 @@
 .idea/
 model.crf.tagger
 confusion_matrix.png
+confusion_matrix_spa.png
+try_things.py
+rand_test.py
