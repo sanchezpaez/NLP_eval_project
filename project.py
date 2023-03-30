@@ -447,8 +447,8 @@ if __name__ == '__main__':
     # 2: TRAIN, TUNE, EVALUATE
 
     # Baselines: basic and advanced
-    accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-    accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
+    # accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
+    # accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239
 
     # Train basic model A
     model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
@@ -456,8 +456,8 @@ if __name__ == '__main__':
                                                                           'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473
     print(classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
     ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-    plt.grid(None)
-    plt.savefig("confusion_matrix_A.png")
+    # plt.grid(None)
+    # plt.savefig("confusion_A.png")
     plt.show()
 
     # Hyperparameter tuning
@@ -470,7 +470,7 @@ if __name__ == '__main__':
                                                                                                 tagged_sents_val,
                                                                                                'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572
     # Train model on sklearn crf implementation
-    accuracy_model_b, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train, y_val)
+    accuracy_model_b, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train, y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap'
 
     # Linguistic Error analysis
     perform_error_analysis(model_outputs, tagged_sents_val)
