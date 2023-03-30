@@ -456,8 +456,7 @@ if __name__ == '__main__':
                                                                           'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473
     print(classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
     ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-    # plt.grid(None)
-    # plt.savefig("confusion_A.png")
+    plt.savefig("confusion_A.png")
     plt.show()
 
     # Hyperparameter tuning
