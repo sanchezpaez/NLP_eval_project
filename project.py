@@ -429,13 +429,13 @@ def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
     return outputs_a, outputs_b
 
 
-if __name__ == '__main__':
+def reformat_train_evaluate_set(directory, train_set, dev_set, test_set):
     # 1: EXTRACT AND REFORMAT DATA
 
     tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
-        extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
-                                  'en_atis-ud-dev.conllu',
-                                  'en_atis-ud-test.conllu')  # 4274 training set, 572 validating set, 586  test
+        extract_and_reformat_data(directory, train_set,
+                                  dev_set,
+                                  test_set)  # 4274 training set, 572 validating set, 586  test
     tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
         sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
     gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
@@ -447,8 +447,10 @@ if __name__ == '__main__':
     # 2: TRAIN, TUNE, EVALUATE
 
     # Baselines: basic and advanced
-    # accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'most_frequent')  # 0.23344370860927152
-    # accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239
+    accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
+                                            'most_frequent')  # 0.23344370860927152
+    accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
+                                  'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239
 
     # Train basic model A
     model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
@@ -462,14 +464,16 @@ if __name__ == '__main__':
     # Hyperparameter tuning
 
     # Experiment with training_opt
-    dataframe, best_accuracy, best_parameters = tune_training_opt(tagged_sents_train, tagged_sents_val, gold_sent_labels_val, 'en')  # 0.9850993377483444
+    dataframe, best_accuracy, best_parameters = tune_training_opt(tagged_sents_train, tagged_sents_val,
+                                                                  gold_sent_labels_val, 'en')  # 0.9850993377483444
     # Specify function to get features
     model_outputs_w_f, tagger_with_func, accuracy_w_f, predicted_token_labels_w_f = train_model(tagged_sents_train,
                                                                                                 sentences_val,
                                                                                                 tagged_sents_val,
-                                                                                               'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572
+                                                                                                'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572
     # Train model on sklearn crf implementation
-    accuracy_model_b, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train, y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap'
+    accuracy_model_b, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train,
+                                                         y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap'
 
     # Linguistic Error analysis
     perform_error_analysis(model_outputs, tagged_sents_val)
@@ -485,9 +489,23 @@ if __name__ == '__main__':
     paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level=0.05,
                               R=1000)  # p-value is 0.000999000999000999 Reject = True
 
-##########################
 
-# Now try with a dataset in Spanish, that is much larger
+if __name__ == '__main__':
+    # Dataset 1: Atis (English)
+    # reformat_train_evaluate_set(
+    #     'UD_English-Atis-master/',
+    #     'en_atis-ud-train.conllu',
+    #     'en_atis-ud-dev.conllu',
+    #     'en_atis-ud-test.conllu'
+    # )
+
+    # Dataset 2: AnCora (Spanish), that is much larger
+    reformat_train_evaluate_set(
+        'UD_Spanish-AnCora-master/',
+        'es_ancora-ud-train.conllu',
+        'es_ancora-ud-dev.conllu',
+        'es_ancora-ud-test.conllu'
+    )
 
 # 1: EXTRACT AND REFORMAT DATA
 
