@@ -2,6 +2,7 @@
 # NLP Eval project
 import pickle
 import random
+import unicodedata
 from collections import Counter
 
 from timeit import default_timer as timer
@@ -127,12 +128,16 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
     print('Training model...')
     if model == 'crf':
         type = 'A'
-        tagger = crf.CRFTagger(feature_func=sent2features)
+        tagger = crf.CRFTagger()
         tagger.train(tagged_train_sents, 'model.crf.tagger')
     elif model == 'crf_es':
         type = 'A'
         tagger = crf.CRFTagger()
         tagger.train(tagged_train_sents, 'model.crf_es.tagger')
+    elif model == 'crf_func':
+        type = 'A'
+        tagger = crf.CRFTagger(feature_func=sent2features)
+        tagger.train(tagged_train_sents, 'model.crf_func.tagger')
     elif model == 'hmm':
         type = 'B'
         trainer = hmm.HiddenMarkovModelTrainer()
@@ -192,17 +197,29 @@ def tune_hyperparameters(tagged_trainset, sents_valset, tagged_valset, sents_tra
 
 
 def train_crf_suite(X_train, X_val, y_train, y_val):
-    tagger = sklearn_crfsuite.CRF(
-        algorithm='lbfgs',
-        max_iterations=100,
-        all_possible_transitions=True
-    )
-    tagger.fit(X_train, y_train)
-    labels = list(tagger.classes_)
-    y_pred = tagger.predict(X_val)
-    accuracy = metrics_crf.flat_accuracy_score(y_val, y_pred)
-    print(f"Accuracy on the validation set with the crf_suite (model B): {accuracy}")
-    return accuracy, y_pred, labels
+    algorithms = ['lbfgs', 'l2sgd', 'ap', 'pa', 'arow']
+    highest_accuracy = 0
+    y_preds = None
+    all_labels = None
+    best_alg = None
+    for a in algorithms:
+        tagger = sklearn_crfsuite.CRF(
+            algorithm=a,
+            max_iterations=100,
+            all_possible_transitions=True
+        )
+        tagger.fit(X_train, y_train)
+        labels = list(tagger.classes_)
+        y_pred = tagger.predict(X_val)
+        accuracy = metrics_crf.flat_accuracy_score(y_val, y_pred)
+        if accuracy > highest_accuracy:
+            highest_accuracy = accuracy
+            y_preds = y_pred
+            all_labels = labels
+            best_alg = a
+        print(f"Accuracy on the validation set with the crf_suite (model A), algorithm {a}: {accuracy}")
+    print(f"The highest accuracy ({highest_accuracy}) was achieved with the algorithm '{best_alg}'")
+    return highest_accuracy, y_preds, all_labels
     # accuracy = metrics.make_scorer(metrics.accuracy_score(gold_tokens_val, predicted_token_labels))
     # # rs = RandomizedSearchCV(estimator=tagger, param_distributions=training_opt,
     # #                         cv=3,
@@ -401,25 +418,40 @@ def check_token_labeling(tagged_train, tagged_val, token):
         get_previous_n_posterior_word(sentence, token)
 
 
-def t_statistic(eval_metric_a: float, eval_metric_b: float) -> float:
+def accuracy(outputs, golden_labels):
+    # assert outputs.shape == golden_labels.shape
+    return sum(outputs == golden_labels) / len(outputs)
+
+
+def t_statistic(eval_metric_a: float, eval_metric_b: float):
     return eval_metric_a - eval_metric_b
+
+
+def compute_test_statistic(outputs_a, outputs_b, gold):
+    acc_a = accuracy_score(outputs_a, gold)
+    acc_b = accuracy_score(outputs_b, gold)
+    return t_statistic(acc_a, acc_b)
 
 
 def paired_randomization_test(outputs_a, outputs_b, gold,
                               rejection_level: float, R: int) -> (float, bool):
     assert len(outputs_a) == len(outputs_b)
-    c = 0  # Set c = 0
-    acc_a = accuracy_score(gold, outputs_a)
-    acc_b = accuracy_score(gold, outputs_b)
-    actual_statistic = t_statistic(acc_a, acc_b)  # Compute actual statistic of score differences |SX − SY| on test data
-    for i in range(0, R):  # for all random shuffles r = 0,...,R do
-        # for all sentences in test set do
-        # Shuffle variable tuples between system X and Y with probability 0.5
-        shuffled_a, shuffled_b = shuffle(outputs_a, outputs_b)
-        pseudo_stat = t_statistic(accuracy_score(gold, shuffled_a), accuracy_score(gold, shuffled_b))  # Compute pseudo-statistic |SXr − SYr | on shuffled data
-        if pseudo_stat >= actual_statistic:  # If |SXr − SYr | >= |SX − SY|
-            c += 1
-    p_value = (c + 1) / (R + 1)
+    test_stat = compute_test_statistic(outputs_a, outputs_b, gold)
+    results = []
+
+    for i in range(0, R):
+        new_outputs_a = []
+        new_outputs_b = []
+        for sent_index in range(len(gold)):
+            swap = np.random.uniform(0, 1)
+            new_outputs_a, new_outputs_b = update_outputs(new_outputs_a, new_outputs_b,
+                                                          outputs_a[sent_index], outputs_b[sent_index], swap < 0.5)
+
+        new_test_stat = compute_test_statistic(np.array(new_outputs_a), np.array(new_outputs_b), gold)
+        results.append(int(abs(new_test_stat) >= abs(test_stat)))
+
+    p_value = (sum(results) + 1) / (len(results) + 1)
+
     if p_value <= rejection_level:  # Reject null hypothesis if p is less than or equal to specified rejection level.
         reject = True
         print(f"The p-value is {p_value}, therefore smaller or equal than the rejection level of {rejection_level}, "
@@ -431,7 +463,32 @@ def paired_randomization_test(outputs_a, outputs_b, gold,
               f"so we fail to reject the null hypotesis.")
         print(f"The difference in  performance for models A and B is thus not statistically significant.")
 
-    return p_value, reject
+
+    return p_value, p_value <= rejection_level
+    # c = 0  # Set c = 0
+    # acc_a = accuracy_score(gold, outputs_a)
+    # acc_b = accuracy_score(gold, outputs_b)
+    # actual_statistic = t_statistic(acc_a, acc_b)  # Compute actual statistic of score differences |SX − SY| on test data
+    # for i in range(0, R):  # for all random shuffles r = 0,...,R do
+    #     # for all sentences in test set do
+    #     # Shuffle variable tuples between system X and Y with probability 0.5
+    #     shuffled_a, shuffled_b = shuffle(outputs_a, outputs_b)
+    #     pseudo_stat = t_statistic(accuracy_score(gold, shuffled_a), accuracy_score(gold, shuffled_b))  # Compute pseudo-statistic |SXr − SYr | on shuffled data
+    #     if pseudo_stat >= actual_statistic:  # If |SXr − SYr | >= |SX − SY|
+    #         c += 1
+    # p_value = (c + 1) / (R + 1)
+    # if p_value <= rejection_level:  # Reject null hypothesis if p is less than or equal to specified rejection level.
+    #     reject = True
+    #     print(f"The p-value is {p_value}, therefore smaller or equal than the rejection level of {rejection_level}, "
+    #           f"so we can reject the null hypotesis.")
+    #     print(f"The difference in  performance for models A and B is thus statistically significant for this sample.")
+    # else:
+    #     reject = False
+    #     print(f"The p-value is {p_value}, therefore greater than the rejection level of {rejection_level}, "
+    #           f"so we fail to reject the null hypotesis.")
+    #     print(f"The difference in  performance for models A and B is thus not statistically significant.")
+    #
+    # return p_value, reject
 
 
 def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, test_set_file):
@@ -453,10 +510,27 @@ def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, t
 
 
 def get_x_and_y_features(tagged_sents_train, tagged_sents_val):
-    X_train = [sent2features(s) for s in tagged_sents_train]
-    y_train = [sent2labels(s) for s in tagged_sents_train]
-    X_val = [sent2features(s) for s in tagged_sents_val]
-    y_val = [sent2labels(s) for s in tagged_sents_val]
+    # X_train = [sent2features(s) for s in tagged_sents_train]
+    # y_train = [sent2labels(s) for s in tagged_sents_train]
+    # X_val = [sent2features(s) for s in tagged_sents_val]
+    # y_val = [sent2labels(s) for s in tagged_sents_val]
+    X_train = []
+    y_train = []
+    for sent in tagged_sents_train:
+        tokens, labels = zip(*sent)
+        features = [sent2features(tokens, i) for i in range(len(tokens))]
+        X_train.append(features)
+        labels = [label for label in labels]
+        y_train.append(labels)
+
+    X_val = []
+    y_val = []
+    for sent in tagged_sents_val:
+        tokens, labels = zip(*sent)
+        features = [sent2features(tokens, i) for i in range(len(tokens))]
+        X_val.append(features)
+        labels = [label for label in labels]
+        y_val.append(labels)
 
     return X_train, y_train, X_val, y_val
 
@@ -479,51 +553,27 @@ def load_data(filename: any) -> any:
 def word2features(sent, i):
     features = []
     word = sent[i]
-    print(word)
 
-    # features = {
-    #     'bias': 1.0,
-    #     'word.lower()': word.lower(),
-    #     'word[-3:]': word[-3:],
-    #     'word[-2:]': word[-2:],
-    #     'word.isupper()': word.isupper(),
-    #     'word.istitle()': word.istitle(),
-    #     'word.isdigit()': word.isdigit(),
-    #     'postag': postag,
-    #     'postag[:2]': postag[:2],
-    # }
-    # if i > 0:
-    #     word1 = sent[i-1][0]
-    #     postag1 = sent[i-1][1]
-    #     features.update({
-    #         '-1:word.lower()': word1.lower(),
-    #         '-1:word.istitle()': word1.istitle(),
-    #         '-1:word.isupper()': word1.isupper(),
-    #         '-1:postag': postag1,
-    #         '-1:postag[:2]': postag1[:2],
-    #     })
-    # else:
-    #     features['BOS'] = True
-    #
-    # if i < len(sent)-1:
-    #     word1 = sent[i+1][0]
-    #     postag1 = sent[i+1][1]
-    #     features.update({
-    #         '+1:word.lower()': word1.lower(),
-    #         '+1:word.istitle()': word1.istitle(),
-    #         '+1:word.isupper()': word1.isupper(),
-    #         '+1:postag': postag1,
-    #         '+1:postag[:2]': postag1[:2],
-    #     })
-    # else:
-    #     features['EOS'] = True
-    word1 = sent[i-1]
-    postag1 = sent[i-1]
     features.append(word.lower())
-    # features.append(word.istitle())
-    # features.append(word.isupper())
     features = [f.encode('utf-8') for f in features]
-
+    features.append(word[-3:])
+    features.append(word[-2:])
+    # features.append(word[-1:])
+    features.append(str(word.istitle()))
+    features.append(str(word.isupper()))
+    features.append(str(word.istitle()))
+    features.append(str(word.isdigit()))
+    punc_cat = {"Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po"}
+    # if all(unicodedata.category(x) in punc_cat for x in word):
+    #     features.append("PUNCTUATION")
+    if i > 0:
+         features.append(sent[i-1])
+    else:
+        features.append(str('BOS'))
+    # if i < len(sent) - 1:
+    #     features.append(sent[i + 1])
+    # else:
+    #     features.append(str('EOS'))
 
     return features
 
@@ -540,6 +590,16 @@ def sent2tokens(sent):
     return [token for token, label in sent]
 
 
+def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
+    if keep:
+        outputs_a.append(sent_a)
+        outputs_b.append(sent_b)
+    else:
+        outputs_a.append(sent_b)
+        outputs_b.append(sent_a)
+    return outputs_a, outputs_b
+
+
 
 # Train & evaluate model
 if __name__=='__main__':
@@ -548,22 +608,14 @@ if __name__=='__main__':
         extract_and_reformat_data('UD_English-Atis-master/', 'en_atis-ud-train.conllu',
                                   'en_atis-ud-dev.conllu',
                                   'en_atis-ud-test.conllu')  # 4274 training set, 572 validating set, 586  test
-    first_sents = tagged_sents_train[:2]
-    print(first_sents)
-    features = []
-    for sent in first_sents:
-        tokens, labels = zip(*sent)
-        feat = [sent2features(tokens, i) for i in range(len(tokens))]
-        features.append(feat)
-    print(features)
-    # tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
-    #     sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
-    # gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
-    #     tagged_sents_train, tagged_sents_val, tagged_sents_test)
-    # gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(
-    #     gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
+    tokens_train, tokens_val, tokens_test = get_tokens_from_sentences(
+        sentences_train, sentences_val, sentences_test)  # 48655, 6644, 6580
+    gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test = get_sentence_gold_labels_from_datasets(
+        tagged_sents_train, tagged_sents_val, tagged_sents_test)
+    gold_tokens_train, gold_tokens_val, gold_tokens_test = get_token_gold_labels(
+        gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test)
 
-    # X_train, y_train, X_val, y_val = get_x_and_y_features(tagged_sents_train, tagged_sents_val)
+    X_train, y_train, X_val, y_val = get_x_and_y_features(tagged_sents_train, tagged_sents_val)
 
     # 2: TRAIN, EVALUATE, TUNE
 
@@ -572,6 +624,8 @@ if __name__=='__main__':
     # accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val, 'mlp')  # Accuracy on the val set with strategy mlp: 0.9262492474413004
     model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
                                                                           tagged_sents_val, 'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473
+    model_outputs, tagger_func, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
+                                                                          tagged_sents_val, 'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572
     # print(metrics.classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
     # ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
     # plt.grid(None)
@@ -580,20 +634,20 @@ if __name__=='__main__':
 
 # Hyperparameter tuning
 # best_params = tune(X_train, y_train) NOOOOOO
-# dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)  # 0.9850993377483444
-# k_fold_validation(tagger, X_val, y_val) NOOOOOOO
+    # dataframe, best_accuracy, best_parameters = tune_hyper_manually(tagged_sents_train, tagged_sents_val, gold_sent_labels_val)  # 0.9850993377483444
+    # k_fold_validation(tagger, X_val, y_val) NOOOOOOO
 
-# Linguistic Error analysis
-# error_analysis(model_outputs, tagged_sents_val)
-# check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
-# check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
+    # Linguistic Error analysis
+    # error_analysis(model_outputs, tagged_sents_val)
+    # check_token_labeling(tagged_sents_train, tagged_sents_val, 'which')
+    # check_token_labeling(tagged_sents_train, tagged_sents_val, 'that')
 
-# Performance evaluation: statistical significance testing
-# accuracy_model_b, pred_b, labels = train_crf_suite(X_train, X_val, y_train, y_val)  # Nooooo
-# model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
-#                                                                       tagged_sents_val, 'hmm')  # 0.9528898254063817
-# test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
-# paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # Reject = True
+    # Performance evaluation: statistical significance testing
+    accuracy_model_b, pred_b, labels = train_crf_suite(X_train, X_val, y_train, y_val)  # Nooooo
+    model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
+                                                                          tagged_sents_val, 'hmm')  # 0.9528898254063817
+    # test_statistic_measure = test_statistic(best_accuracy, accuracy_model_b)
+    paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level= 0.05, R=1000)  # p-value is 0.000999000999000999 Reject = True
 
 ##########################
 
