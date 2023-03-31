@@ -430,6 +430,20 @@ def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
     return outputs_a, outputs_b
 
 
+def plot_accuracies_all_models():
+    data = {'Model': ['Baseline most frequent', 'Baseline mlp', 'Paradigm A default',
+                      'Paradigm A train_opt', 'Paradigm A func', 'Paradigm A sklearn',
+                      'Paradigm B default'],
+            'Accuracy_dev_set1': [0.233, 0.922, 0.979, 0.985, 0.980, 0.985, 0.952],
+            'Accuracy_dev_set2': [0.172, 0.839, 0.969, 0.977, 0.966, 0.974, 0.515]
+            }
+
+    df = pd.DataFrame(data)
+    df.plot(x='Model', y=['Accuracy_dev_set1', 'Accuracy_dev_set2'], rot=20)
+    plt.savefig('accuracy_dev.png')
+    plt.show()
+
+
 def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str):
     # 1: EXTRACT AND REFORMAT DATA
 
@@ -481,7 +495,7 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
                                                          y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap' // 0.97433401824015
 
     # Linguistic Error analysis
-    perform_error_analysis(model_outputs, tagged_sents_val)  # en = // 1681 incorrectly labeled tokens, 1135 of which are unique. que, como, la, cuando, mientras
+    perform_error_analysis(model_outputs, tagged_sents_val)  # en = 137 incorrectly labeled tokens, 63 of which are unique. that, nonstop, which, to, is // 1681 incorrectly labeled tokens, 1135 of which are unique. que, como, la, cuando, mientras
     if set == 'en':
         get_token_previous_posterior_with_labels(tagged_sents_train, tagged_sents_val, 'which')
         get_token_previous_posterior_with_labels(tagged_sents_train, tagged_sents_val, 'that')
@@ -496,68 +510,24 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
                                                                                   'hmm')  # 0.9528898254063817 // 0.5158609999639523
     paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level=0.05,
                               R=1000)  # p-value is 0.000999000999000999 Reject = True // same
+    plot_accuracies_all_models()
 
 
 if __name__ == '__main__':
     # Dataset 1: Atis (English)
-    # reformat_train_evaluate_set(
-    #     'UD_English-Atis-master/',
-    #     'en_atis-ud-train.conllu',
-    #     'en_atis-ud-dev.conllu',
-    #     'en_atis-ud-test.conllu',
-    #     'en'
-    # )
-
-    # Dataset 2: AnCora (Spanish), that is much larger
     reformat_train_evaluate_set(
-        'UD_Spanish-AnCora-master/',
-        'es_ancora-ud-train.conllu',
-        'es_ancora-ud-dev.conllu',
-        'es_ancora-ud-test.conllu',
-        'spa'
+        'UD_English-Atis-master/',
+        'en_atis-ud-train.conllu',
+        'en_atis-ud-dev.conllu',
+        'en_atis-ud-test.conllu',
+        'en'
     )
 
-# 1: EXTRACT AND REFORMAT DATA
-
-# tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2, sentences_train_s2, sentences_val_s2, sentences_test_s2 = extract_and_reformat_data(
-#     'UD_Spanish-AnCora-master/', 'es_ancora-ud-train.conllu', 'es_ancora-ud-dev.conllu', 'es_ancora-ud-test.conllu')  # 14287 training sents, 1654 val, 1721 test
-# tokens_train_s2, tokens_val_s2, tokens_test_s2 = get_tokens_from_sentences(
-#     sentences_train_s2, sentences_val_s2, sentences_test_s2)  # 469366, 55482, 55603
-# gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2 = get_sentence_gold_labels_from_datasets(
-#     tagged_sents_train_s2, tagged_sents_val_s2, tagged_sents_test_s2)
-# gold_tokens_train_s2, gold_tokens_val_s2, gold_tokens_test_s2 = get_token_gold_labels(
-#     gold_sent_labels_train_s2, gold_sent_labels_val_s2, gold_sent_labels_test_s2)
-
-# 2: TRAIN, EVALUATE, TUNE
-
-# Baselines: basic and advanced
-# accuracy_most_frequent = train_baseline(tokens_train_s2, gold_tokens_train_s2, tokens_val_s2, gold_tokens_val_s2, 'most_frequent')  # 0.17295699506146137
-# accuracy_mlp = train_baseline(tokens_train_s2, gold_tokens_train_s2, tokens_val_s2, gold_tokens_val_s2, 'mlp')  # Accuracy on the val set with baseline B strategy mlp: 0.8396957571825097
-
-# # Train & evaluate model
-# model_outputs_s2, tagger_s2, accuracy_s2, predicted_token_labels_s2 = train_model(
-#     tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'crf_es')  # Accuracy on the validation set with crf.CRFTagger: 0.9697018852961321
-# print(metrics.classification_report(gold_tokens_val_s2, predicted_token_labels_s2, zero_division=0))
-# save_data(predicted_token_labels_s2, 'predicted_token_labels_s2.pkl')
-# save_data(model_outputs_s2, 'model_outputs_s2.pkl')
-
-# ConfusionMatrixDisplay.from_predictions(gold_tokens_val_s2, predicted_token_labels_s2, xticks_rotation='vertical')
-# plt.grid(None)
-# plt.savefig("confusion_matrix_spa.png")
-# plt.show()
-
-# dataframe, best_accuracy, best_parameters = tune_hyper_manually(
-#     tagged_sents_train_s2, tagged_sents_val_s2, gold_sent_labels_val_s2, 'spa')  # Accuracy on the validation set with the best parameters for CRF (model A): 0.9771457409610325
-
-# Linguistic Error analysis
-# error_analysis(model_outputs_s2, tagged_sents_val_s2)
-## 1681 incorrectly labeled tokens, 1135 of which are unique.
-## Top mislabeled: que, como, la, cuando, mientras
-# check_token_labeling(tagged_sents_train_s2, tagged_sents_val_s2, 'que')
-# check_token_labeling(tagged_sents_train_s2, tagged_sents_val_s2, 'como')
-
-# # Performance evaluation: statistical significance testing
-# model_outputs_b_s2, tagger_b_s2, accuracy_b_s2, predicted_token_labels_b_s2 = train_model(
-#     tagged_sents_train_s2, sentences_val_s2, tagged_sents_val_s2, 'hmm')  # Accuracy on the validation set with hmm: 0.5158609999639523
-# paired_randomization_test(
-#     predicted_token_labels_s2, predicted_token_labels_b_s2, gold_tokens_val_s2, rejection_level= 0.05, R=1000)  # Reject = True
+    # Dataset 2: AnCora (Spanish), that is much larger
+    # reformat_train_evaluate_set(
+    #     'UD_Spanish-AnCora-master/',
+    #     'es_ancora-ud-train.conllu',
+    #     'es_ancora-ud-dev.conllu',
+    #     'es_ancora-ud-test.conllu',
+    #     'spa'
+    # )
