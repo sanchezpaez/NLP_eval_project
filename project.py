@@ -12,21 +12,19 @@ import sklearn_crfsuite
 from conllu import parse
 from matplotlib import pyplot as plt
 from nltk.tag import hmm, crf
-from sklearn import metrics
 from sklearn.dummy import DummyClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import make_scorer, accuracy_score, ConfusionMatrixDisplay, classification_report
-from sklearn.model_selection import GridSearchCV, cross_validate
+from sklearn.metrics import accuracy_score
 from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn_crfsuite import metrics as metrics_crf
 from tqdm import tqdm
-
 
 SEED = 10
 
 
 def read_datasets(corpus_dirname, train_filename, dev_filename, test_filename):
+    """Find path for corpus directory, read and return training, development and test sets."""
+
     CORPUS_PATH = Path(corpus_dirname)
 
     TRAIN_PATH = CORPUS_PATH / train_filename
@@ -46,6 +44,8 @@ def read_datasets(corpus_dirname, train_filename, dev_filename, test_filename):
 
 
 def tag_datasets(train_set, val_set, test_set):
+    """Return POS-tagged sentences from dataset splits."""
+
     tagged_sents_train = [[(word['form'], word['upos']) for word in sent] for sent in train_set]
     tagged_sents_val = [[(word['form'], word['upos']) for word in sent] for sent in val_set]
     tagged_sents_test = [[(word['form'], word['upos']) for word in sent] for sent in test_set]
@@ -54,6 +54,8 @@ def tag_datasets(train_set, val_set, test_set):
 
 
 def get_sentences_from_datasets(train_set, val_set, test_set):
+    """Return sentences from dataset splits as lists of strings."""
+
     sents_train = [[word['form'] for word in sent] for sent in train_set]
     sents_val = [[word['form'] for word in sent] for sent in val_set]
     sents_test = [[word['form'] for word in sent] for sent in test_set]
@@ -62,6 +64,8 @@ def get_sentences_from_datasets(train_set, val_set, test_set):
 
 
 def get_sentence_gold_labels_from_datasets(tagged_train, tagged_val, tagged_test):
+    """Return POS-tag labels for every token in every sentence."""
+
     gold_sent_labels_train = [[(word[1]) for word in sent] for sent in tagged_train]
     gold_sent_labels_val = [[(word[1]) for word in sent] for sent in tagged_val]
     gold_sent_labels_test = [[(word[1]) for word in sent] for sent in tagged_test]
@@ -70,6 +74,8 @@ def get_sentence_gold_labels_from_datasets(tagged_train, tagged_val, tagged_test
 
 
 def get_tokens_from_sentences(sent_train, sent_val, sent_test):
+    """Return list of tokens (str) for every sentence in data split."""
+
     tokens_train = [token for sentence in sent_train for token in sentence]
     tokens_val = [token for sentence in sent_val for token in sentence]
     tokens_test = [token for sentence in sent_test for token in sentence]
@@ -81,6 +87,8 @@ def get_tokens_from_sentences(sent_train, sent_val, sent_test):
 
 
 def get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sent_labels_test):
+    """Return list of POS-tags for all tokens in a set split."""
+
     gold_tokens_train = [label for sentence in gold_sent_labels_train for label in sentence]
     gold_tokens_val = [label for sentence in gold_sent_labels_val for label in sentence]
     gold_tokens_test = [label for sentence in gold_sent_labels_test for label in sentence]
@@ -88,16 +96,22 @@ def get_token_gold_labels(gold_sent_labels_train, gold_sent_labels_val, gold_sen
 
 
 def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
+    """
+    Train a baseline depending on specified strategy.
+    Fit model, predict labels for validating set, compute
+    and return accuracy for the validating set.
+    """
+
     print('Training baseline...')
     if strategy == 'most_frequent':
-        classifier = DummyClassifier(strategy='most_frequent')
+        classifier = DummyClassifier(strategy='most_frequent', random_state=SEED)
         classifier.fit(tokens_train, gold_train)
         multiclass_predictions = classifier.predict(tokens_val)
         multiclass_imbalanc_probs = classifier.predict_proba(tokens_val)
         accuracy = classifier.score(tokens_val, gold_val)
         print(f'Accuracy on the val set with baseline A strategy {strategy}: {accuracy}')
     elif strategy == 'mlp':
-        classifier = MLPClassifier(verbose=True)
+        classifier = MLPClassifier(verbose=True, random_state=SEED)
         X_train, y_train, X_val = transform_raw_data_into_matrix(tokens_train, gold_train, tokens_val)
         classifier.fit(X_train, y_train)
         multiclass_predictions = classifier.predict(X_val)
@@ -109,6 +123,10 @@ def train_baseline(tokens_train, gold_train, tokens_val, gold_val, strategy):
 
 
 def transform_raw_data_into_matrix(train_tokens, train_labels, dev_tokens):
+    """
+    Transform list of tokens and labels into two arrays
+    in order to prepare data for training a model.
+    """
     assert len(train_tokens) == len(train_labels)
     y = np.array(train_labels)
     vectorizer = TfidfVectorizer()
@@ -143,7 +161,7 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
     model_outputs = tagger.tag_sents(sentences_val)
     print(f"This is an example of a sentence tagged by the model {model}: \n {model_outputs[0]}")
     accuracy = tagger.evaluate(tagged_val_sents)
-    print(f"Accuracy on the validation set with {model}, model {type} : {accuracy}")
+    print(f"Accuracy on the validation set with {model}, paradigm {type} : {accuracy}")
     predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
 
     return model_outputs, tagger, accuracy, predicted_labels
@@ -215,9 +233,23 @@ def tune_training_opt(tagged_train_sents, tagged_val_sents, sentences_val, set):
     return df, highest_accuracy, best_params
 
 
+def train_best_params_n_function(tagged_train_sents, computed_best_params, sentences_val, tagged_val_sents, model):
+    print('Training model...')
+    type = 'A'
+    tagger = crf.CRFTagger(feature_func=sent2features, training_opt=computed_best_params)
+    tagger.train(tagged_train_sents, 'model.crf_tuned.tagger')
+    model_outputs = tagger.tag_sents(sentences_val)
+    print(f"This is an example of a sentence tagged by the model {model}: \n {model_outputs[0]}")
+    accuracy = tagger.evaluate(tagged_val_sents)
+    print(f"Accuracy on the validation set with {model}, paradigm {type} : {accuracy}")
+    predicted_labels = [tag for sentence in model_outputs for token, tag in sentence]
+
+    return model_outputs, tagger, accuracy, predicted_labels
+
+
 def perform_error_analysis(model_outputs, tagged_val_sentences):
     top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': [],
-                  'que': [], 'como': [], 'la': [], 'cuando': [], 'mientras': []}  # todo: defaultdict?
+                  'que': [], 'como': [], 'la': [], 'cuando': [], 'mientras': []}
     count = 0
     incorrectly_labeled_token_occurrences = 0
     tokens = {}
@@ -311,7 +343,8 @@ def paired_randomization_test(outputs_a, outputs_b, gold,
         for sent_index in range(len(gold)):
             swap = np.random.uniform(0, 1)
             swapped_outputs_a, swapped_outputs_b = update_outputs(swapped_outputs_a, swapped_outputs_b,
-                                                          outputs_a[sent_index], outputs_b[sent_index], swap < 0.5)
+                                                                  outputs_a[sent_index], outputs_b[sent_index],
+                                                                  swap < 0.5)
 
         pseudo_stat = compute_test_statistic(np.array(swapped_outputs_a), np.array(swapped_outputs_b), gold)
         results.append(int(abs(pseudo_stat) >= abs(test_stat)))
@@ -432,14 +465,14 @@ def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
 
 def plot_accuracies_all_models(accuracies_set_a: list, accuracies_set_b):
     data = {'Model': ['Baseline most frequent', 'Baseline mlp', 'Paradigm A default',
-                      'Paradigm A train_opt', 'Paradigm A func', 'Paradigm A sklearn',
-                      'Paradigm B default'],
+                      'Paradigm A train_opt', 'Paradigm A func', 'Paradigm A tuned',
+                      'Paradigm A sklearn', 'Paradigm B default'],
             'Accuracy_dev_set1': accuracies_set_a,
             'Accuracy_dev_set2': accuracies_set_b
             }
 
-    # 'Accuracy_dev_set1': [0.233, 0.922, 0.979, 0.985, 0.980, 0.985, 0.952],
-    # 'Accuracy_dev_set2': [0.172, 0.839, 0.969, 0.977, 0.966, 0.974, 0.515]
+    # 'Accuracy_dev_set1': [0.233, 0.922, 0.979, 0.985, 0.980, 0.984, 0.985, 0.952],
+    # 'Accuracy_dev_set2': [0.172, 0.839, 0.969, 0.977, 0.966, 0.972, 0.974, 0.515]
 
     df = pd.DataFrame(data)
     df.plot(x='Model', y=['Accuracy_dev_set1', 'Accuracy_dev_set2'], rot=20)
@@ -447,7 +480,7 @@ def plot_accuracies_all_models(accuracies_set_a: list, accuracies_set_b):
     plt.show()
 
 
-def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str):
+def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set: str):
     # 1: EXTRACT AND REFORMAT DATA
 
     tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
@@ -466,21 +499,21 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
 
     all_accuracies = []
     # Baselines: basic and advanced
-    accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
-                                            'most_frequent')  # 0.23344370860927152 // 0.17295699506146137
-    all_accuracies.append(accuracy_most_frequent)
-    accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
-                                  'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239 // 0.8399120435456544
-    all_accuracies.append(accuracy_mlp)
-    # Train basic model A
+    # accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
+    #                                         'most_frequent')  # 0.23344370860927152 // 0.17295699506146137
+    # all_accuracies.append(accuracy_most_frequent)
+    # accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
+    #                               'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239 // 0.8399120435456544
+    # all_accuracies.append(accuracy_mlp)
+    # # Train basic model A
     model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
                                                                           tagged_sents_val,
                                                                           'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473 // 0.9697018852961321
-    all_accuracies.append(accuracy)
-    print(classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
-    ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
-    plt.savefig("confusion_A.png")
-    plt.show()
+    # all_accuracies.append(accuracy)
+    # print(classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
+    # ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
+    # plt.savefig("confusion_A.png")
+    # plt.show()
 
     # Hyperparameter tuning
 
@@ -498,13 +531,24 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
                                                                                                 tagged_sents_val,
                                                                                                 'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572 // 0.966367470530983
     all_accuracies.append(accuracy_w_f)
+
+    # Combine training options and feature function
+    model_outputs_tuned, tagger_tuned, accuracy_tuned, predicted_token_labels_tuned = train_best_params_n_function(
+        tagged_sents_train,
+        best_parameters,
+        sentences_val,
+        tagged_sents_val,
+        'crf_tuned')  # Accuracy on the validation set with crf_tuned, model A 0.984 :  // 0.9723153455174651
+    all_accuracies.append(accuracy_tuned)
+
     # Train model on sklearn crf implementation
     accuracy_sklearn, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train,
                                                          y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap' // 0.97433401824015
     all_accuracies.append(accuracy_sklearn)
 
     # Linguistic Error analysis
-    perform_error_analysis(model_outputs, tagged_sents_val)  # en = 137 incorrectly labeled tokens, 63 of which are unique. that, nonstop, which, to, is // 1681 incorrectly labeled tokens, 1135 of which are unique. que, como, la, cuando, mientras
+    perform_error_analysis(model_outputs,
+                           tagged_sents_val)  # en = 137 incorrectly labeled tokens, 63 of which are unique. that, nonstop, which, to, is // 1681 incorrectly labeled tokens, 1135 of which are unique. que, como, la, cuando, mientras
     if set == 'en':
         get_token_previous_posterior_with_labels(tagged_sents_train, tagged_sents_val, 'which')
         get_token_previous_posterior_with_labels(tagged_sents_train, tagged_sents_val, 'that')
@@ -525,23 +569,21 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
 
 if __name__ == '__main__':
     # Dataset 1: Atis (English)
-    accuracies_atis = reformat_train_evaluate_set(
-        'UD_English-Atis-master/',
-        'en_atis-ud-train.conllu',
-        'en_atis-ud-dev.conllu',
-        'en_atis-ud-test.conllu',
-        'en'
-    )
-
-    # Dataset 2: AnCora (Spanish), that is much larger
-    # accuracies_ancora = reformat_train_evaluate_set(
-    #     'UD_Spanish-AnCora-master/',
-    #     'es_ancora-ud-train.conllu',
-    #     'es_ancora-ud-dev.conllu',
-    #     'es_ancora-ud-test.conllu',
-    #     'spa'
+    # accuracies_atis = reformat_train_evaluate_set(
+    #     'UD_English-Atis-master/',
+    #     'en_atis-ud-train.conllu',
+    #     'en_atis-ud-dev.conllu',
+    #     'en_atis-ud-test.conllu',
+    #     'en'
     # )
 
+    # Dataset 2: AnCora (Spanish), that is much larger
+    accuracies_ancora = reformat_train_evaluate_set(
+        'UD_Spanish-AnCora-master/',
+        'es_ancora-ud-train.conllu',
+        'es_ancora-ud-dev.conllu',
+        'es_ancora-ud-test.conllu',
+        'spa'
+    )
+
     # plot_accuracies_all_models(accuracies_atis, accuracies_ancora)
-
-
