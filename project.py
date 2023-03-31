@@ -430,13 +430,16 @@ def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
     return outputs_a, outputs_b
 
 
-def plot_accuracies_all_models():
+def plot_accuracies_all_models(accuracies_set_a: list, accuracies_set_b):
     data = {'Model': ['Baseline most frequent', 'Baseline mlp', 'Paradigm A default',
                       'Paradigm A train_opt', 'Paradigm A func', 'Paradigm A sklearn',
                       'Paradigm B default'],
-            'Accuracy_dev_set1': [0.233, 0.922, 0.979, 0.985, 0.980, 0.985, 0.952],
-            'Accuracy_dev_set2': [0.172, 0.839, 0.969, 0.977, 0.966, 0.974, 0.515]
+            'Accuracy_dev_set1': accuracies_set_a,
+            'Accuracy_dev_set2': accuracies_set_b
             }
+
+    # 'Accuracy_dev_set1': [0.233, 0.922, 0.979, 0.985, 0.980, 0.985, 0.952],
+    # 'Accuracy_dev_set2': [0.172, 0.839, 0.969, 0.977, 0.966, 0.974, 0.515]
 
     df = pd.DataFrame(data)
     df.plot(x='Model', y=['Accuracy_dev_set1', 'Accuracy_dev_set2'], rot=20)
@@ -461,16 +464,19 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
 
     # 2: TRAIN, TUNE, EVALUATE
 
+    all_accuracies = []
     # Baselines: basic and advanced
     accuracy_most_frequent = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
                                             'most_frequent')  # 0.23344370860927152 // 0.17295699506146137
+    all_accuracies.append(accuracy_most_frequent)
     accuracy_mlp = train_baseline(tokens_train, gold_tokens_train, tokens_val, gold_tokens_val,
                                   'mlp')  # Accuracy on the val set with strategy mlp: 0.922787477423239 // 0.8399120435456544
-
+    all_accuracies.append(accuracy_mlp)
     # Train basic model A
     model_outputs, tagger, accuracy, predicted_token_labels = train_model(tagged_sents_train, sentences_val,
                                                                           tagged_sents_val,
                                                                           'crf')  # Accuracy on the validation set with crf.CRFTagger default: 0.9793798916315473 // 0.9697018852961321
+    all_accuracies.append(accuracy)
     print(classification_report(gold_tokens_val, predicted_token_labels, zero_division=0))
     ConfusionMatrixDisplay.from_predictions(gold_tokens_val, predicted_token_labels, xticks_rotation='vertical')
     plt.savefig("confusion_A.png")
@@ -485,14 +491,17 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
     else:
         dataframe, best_accuracy, best_parameters = tune_training_opt(tagged_sents_train, tagged_sents_val,
                                                                       gold_sent_labels_val, 'en')  # 0.9850993377483444
+    all_accuracies.append(best_accuracy)
     # Specify function to get features
     model_outputs_w_f, tagger_with_func, accuracy_w_f, predicted_token_labels_w_f = train_model(tagged_sents_train,
                                                                                                 sentences_val,
                                                                                                 tagged_sents_val,
                                                                                                 'crf_func')  # Accuracy on the validation set with crf_func, model A : 0.9804334738109572 // 0.966367470530983
+    all_accuracies.append(accuracy_w_f)
     # Train model on sklearn crf implementation
-    accuracy_model_b, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train,
+    accuracy_sklearn, pred_b, labels = train_crf_sklearn(X_train, X_val, y_train,
                                                          y_val)  # The highest accuracy (0.9850993377483444) was achieved with the algorithm 'ap' // 0.97433401824015
+    all_accuracies.append(accuracy_sklearn)
 
     # Linguistic Error analysis
     perform_error_analysis(model_outputs, tagged_sents_val)  # en = 137 incorrectly labeled tokens, 63 of which are unique. that, nonstop, which, to, is // 1681 incorrectly labeled tokens, 1135 of which are unique. que, como, la, cuando, mientras
@@ -508,14 +517,15 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set:str
     model_outputs_b, tagger_b, accuracy_b, predicted_token_labels_b = train_model(tagged_sents_train, sentences_val,
                                                                                   tagged_sents_val,
                                                                                   'hmm')  # 0.9528898254063817 // 0.5158609999639523
+    all_accuracies.append(accuracy_b)
     paired_randomization_test(predicted_token_labels, predicted_token_labels_b, gold_tokens_val, rejection_level=0.05,
                               R=1000)  # p-value is 0.000999000999000999 Reject = True // same
-    plot_accuracies_all_models()
+    return all_accuracies
 
 
 if __name__ == '__main__':
     # Dataset 1: Atis (English)
-    reformat_train_evaluate_set(
+    accuracies_atis = reformat_train_evaluate_set(
         'UD_English-Atis-master/',
         'en_atis-ud-train.conllu',
         'en_atis-ud-dev.conllu',
@@ -524,10 +534,14 @@ if __name__ == '__main__':
     )
 
     # Dataset 2: AnCora (Spanish), that is much larger
-    # reformat_train_evaluate_set(
+    # accuracies_ancora = reformat_train_evaluate_set(
     #     'UD_Spanish-AnCora-master/',
     #     'es_ancora-ud-train.conllu',
     #     'es_ancora-ud-dev.conllu',
     #     'es_ancora-ud-test.conllu',
     #     'spa'
     # )
+
+    # plot_accuracies_all_models(accuracies_atis, accuracies_ancora)
+
+
