@@ -663,25 +663,25 @@ def reformat_train_evaluate_set_final(directory, train_set, dev_set, test_set, s
 
 if __name__ == '__main__':
     # VALIDATING SET
-    # Dataset 1: Atis (English)
-    # accuracies_atis = reformat_train_evaluate_set(
-    #     'UD_English-Atis-master/',
-    #     'en_atis-ud-train.conllu',
-    #     'en_atis-ud-dev.conllu',
-    #     'en_atis-ud-test.conllu',
-    #     'en'
-    # )
+    Dataset 1: Atis (English)
+    accuracies_atis = reformat_train_evaluate_set(
+        'UD_English-Atis-master/',
+        'en_atis-ud-train.conllu',
+        'en_atis-ud-dev.conllu',
+        'en_atis-ud-test.conllu',
+        'en'
+    )
 
-    # Dataset 2: AnCora (Spanish), that is much larger
-    # accuracies_ancora = reformat_train_evaluate_set(
-    #     'UD_Spanish-AnCora-master/',
-    #     'es_ancora-ud-train.conllu',
-    #     'es_ancora-ud-dev.conllu',
-    #     'es_ancora-ud-test.conllu',
-    #     'spa'
-    # )
+    Dataset 2: AnCora (Spanish), that is much larger
+    accuracies_ancora = reformat_train_evaluate_set(
+        'UD_Spanish-AnCora-master/',
+        'es_ancora-ud-train.conllu',
+        'es_ancora-ud-dev.conllu',
+        'es_ancora-ud-test.conllu',
+        'spa'
+    )
 
-    # plot_accuracies_all_models(accuracies_atis, accuracies_ancora)
+    plot_accuracies_all_models(accuracies_atis, accuracies_ancora)
 
     # TEST SET
 
