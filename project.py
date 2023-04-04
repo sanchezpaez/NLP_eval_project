@@ -137,6 +137,17 @@ def transform_raw_data_into_matrix(train_tokens, train_labels, dev_tokens):
 
 
 def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
+    """
+    Choose paradigm and implementation, train/save model. Use model to
+    tag sentences from validation set and calculate accuracy accordingly.
+    :param tagged_train_sents: list of lists of tuples with token, POS-tag values
+        used for supervised training.
+    :param sentences_val: List of lists of tokens(str) that the model will tag
+    :param tagged_val_sents: list of lists of tuples with token, POS-tag values
+        used for calculating accuracy of the model.
+    :param model: type of paradigm used for training, indicates implementation type
+    :return: outputs, tagger, accuracy score, predicted_labels
+    """
     print('Training model...')
     if model == 'crf':
         type = 'A'
@@ -169,6 +180,15 @@ def train_model(tagged_train_sents, sentences_val, tagged_val_sents, model):
 
 
 def train_crf_sklearn(X_train, X_val, y_train, y_val):
+    """
+    Train model on crf paradigm with sklearn implementation.
+    Iterate over all possible estimating algorithms to train model.
+    :param X_train: training sentences as numpy array
+    :param X_val: validating sentences as numpy array
+    :param y_train: training labels as numpy array
+    :param y_val: validating labels as numpy array
+    :return: highest_accuracy, y_preds, all_labels
+    """
     algorithms = ['lbfgs', 'l2sgd', 'ap', 'pa', 'arow']
     highest_accuracy = 0
     y_preds = None
@@ -195,6 +215,18 @@ def train_crf_sklearn(X_train, X_val, y_train, y_val):
 
 
 def tune_training_opt(tagged_train_sents, tagged_val_sents, sentences_val, set):
+    """
+    Try out random different training options for training a crf model.
+    Return parameter combination that achieves highest accuracy
+    and print out dataframe with used combinations.
+    :param tagged_train_sents: list of lists of tuples with token, POS-tag values
+        used for supervised training.
+    :param tagged_val_sents: list of lists of tuples with token, POS-tag values
+        used for calculating accuracy of the model.
+    :param sentences_val: List of lists of tokens(str) that the model will tag
+    :param set: specifies dataset: 'en' = English, 'spa' = Spanish
+    :return: df, highest_accuracy, best_params
+    """
     print('Performing hyperparameter tuning...')
     highest_accuracy = 0
     best_params = None
@@ -235,6 +267,18 @@ def tune_training_opt(tagged_train_sents, tagged_val_sents, sentences_val, set):
 
 
 def train_best_params_n_function(tagged_train_sents, computed_best_params, sentences_val, tagged_val_sents, model):
+    """
+    Use best training options from tune_training_opt and sent2features
+    function to do fine tuning of model.
+    :param tagged_train_sents: list of lists of tuples with token, POS-tag values
+        used for supervised training.
+    :param computed_best_params: dict with best combination of training parameters.
+    :param sentences_val: List of lists of tokens(str) that the model will tag
+    :param tagged_val_sents: list of lists of tuples with token, POS-tag values
+        used for calculating accuracy of the model.
+    :param model: type of paradigm used for training, indicates implementation type
+    :return: model_outputs, tagger, accuracy, predicted_labels.
+    """
     print('Training model...')
     type = 'A'
     tagger = crf.CRFTagger(feature_func=sent2features, training_opt=computed_best_params)
@@ -249,6 +293,13 @@ def train_best_params_n_function(tagged_train_sents, computed_best_params, sente
 
 
 def perform_error_analysis(model_outputs, tagged_val_sentences):
+    """
+    Compare model-generated outputs against gold standard and print out
+    mislabeled tokens with their context sentence and top 5 errors.
+    :param model_outputs: list of lists of tuples(token, POS-tag) with
+        model predictions
+    :param tagged_val_sentences: gold standard
+    """
     top_errors = {'nonstop': [], 'that': [], 'which': [], 'is': [], 'to': [],
                   'que': [], 'como': [], 'la': [], 'cuando': [], 'mientras': [],
                   'much': []}
@@ -285,12 +336,17 @@ def perform_error_analysis(model_outputs, tagged_val_sentences):
 
 
 def transform_tagged_sent_to_sentence(tagged_sentence):
+    """Take list of tagged tokens and return str with all tokens."""
     tokens = [token for token, tag in tagged_sentence]
     sentence = ' '.join(tokens)
     return sentence
 
 
 def get_previous_n_posterior_word(sentence, token):
+    """
+    Find previous and posterior tokens to a word in a tagged sentence
+    and print out the three elements with their POS-tags.
+    """
     for i in range(len(sentence)):
         word = sentence[i]
         if word[0] == token:
@@ -306,6 +362,7 @@ def get_previous_n_posterior_word(sentence, token):
 
 
 def get_token_previous_posterior_with_labels(tagged_train, tagged_val, token):
+    """Call get_previous_n_posterior_word for sentences containing a certain token."""
     print()
     print()
     print('___________________These are the validating-set sentences._____________________')
@@ -324,10 +381,12 @@ def get_token_previous_posterior_with_labels(tagged_train, tagged_val, token):
 
 
 def t_statistic(eval_metric_a: float, eval_metric_b: float):
+    """Compute and return test statistic on two evaluation metrics."""
     return eval_metric_a - eval_metric_b
 
 
 def compute_test_statistic(outputs_a, outputs_b, gold):
+    """Calculate accuracy for models A and B and call t_statistic."""
     acc_a = accuracy_score(outputs_a, gold)
     acc_b = accuracy_score(outputs_b, gold)
     return t_statistic(acc_a, acc_b)
@@ -335,6 +394,16 @@ def compute_test_statistic(outputs_a, outputs_b, gold):
 
 def paired_randomization_test(outputs_a, outputs_b, gold,
                               rejection_level: float, R: int) -> (float, bool):
+    """
+    Perform two-tailed randomization test to compute statistical significance.
+    Return p-value and reject or fail to reject null hypothesis accordingly.
+    :param outputs_a: Tags predicted by model A on gold set
+    :param outputs_b: Tags predicted by model B on gold set
+    :param gold: Real labels for validation set
+    :param rejection_level: threshold to reject or fail to reject null hypothesis
+    :param R: number of repetitions
+    :return: p-value, reject
+    """
     assert len(outputs_a) == len(outputs_b)
     test_stat = compute_test_statistic(outputs_a, outputs_b, gold)
     results = []
@@ -368,6 +437,16 @@ def paired_randomization_test(outputs_a, outputs_b, gold,
 
 
 def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, test_set_file):
+    """
+    Call read_datasets, tag_datasets and get_sentences_from_datasets on dataset splits
+    and return reformatted data for model training and evaluating.
+    :param directory_name: directory where datasets splits are
+    :param train_setset_file: file with training set
+    :param val_set_file: file with validating set
+    :param test_set_file: file with test set
+    :return: tagged_sents_train, tagged_sents_val, tagged_sents_test,
+        sentences_train, sentences_val, sentences_test
+    """
     train_data, val_data, test_data = read_datasets(directory_name, train_setset_file,
                                                     val_set_file, test_set_file)
     tagged_sents_train, tagged_sents_val, tagged_sents_test = tag_datasets(train_data, val_data, test_data)
@@ -386,6 +465,7 @@ def extract_and_reformat_data(directory_name, train_setset_file, val_set_file, t
 
 
 def get_X_and_y_features_from_datasets(tagged_sents_train, tagged_sents_val):
+    """Take tagged sents and return features and according labels."""
     X_train = []
     y_train = []
     for sent in tagged_sents_train:
@@ -423,6 +503,7 @@ def load_data(filename: any) -> any:
 
 
 def word2features(sent, i):
+    """Return list of features for every token in a sentence."""
     features = []
     word = sent[i]
 
@@ -452,10 +533,12 @@ def word2features(sent, i):
 
 
 def sent2features(sent, index):
+    """Call word2features on sentence."""
     return word2features(sent, index)
 
 
 def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
+    """Return lists of swapped outputs."""
     if keep:
         outputs_a.append(sent_a)
         outputs_b.append(sent_b)
