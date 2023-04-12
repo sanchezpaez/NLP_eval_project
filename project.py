@@ -549,6 +549,7 @@ def update_outputs(outputs_a, outputs_b, sent_a, sent_b, keep):
 
 
 def plot_accuracies_all_models(accuracies_set_a: list, accuracies_set_b):
+    """Plot accuracies of all models for every dataset."""
     data = {'Model': ['Baseline most frequent', 'Baseline mlp', 'Paradigm A default',
                       'Paradigm A train_opt', 'Paradigm A func', 'Paradigm A tuned',
                       'Paradigm A sklearn', 'Paradigm B default'],
@@ -569,6 +570,15 @@ def plot_accuracies_all_models(accuracies_set_a: list, accuracies_set_b):
 
 
 def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set: str):
+    """
+    :param directory: the directory where the dataset files are located
+    :param train_set: Train set file in conllu format
+    :param dev_set: Development set file in conllu format
+    :param test_set: Test set file in conllu format
+    :param set: Name (language) of dataset, for example 'en'
+    :return: list of accuracies (floats) scored by all models trained on the dataset
+    against the validating set.
+    """
     # 1: EXTRACT AND REFORMAT DATA
 
     tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
@@ -658,6 +668,15 @@ def reformat_train_evaluate_set(directory, train_set, dev_set, test_set, set: st
 
 
 def reformat_train_evaluate_set_final(directory, train_set, dev_set, test_set, set: str):
+    """
+    :param directory: the directory where the dataset files are located
+    :param train_set: Train set file in conllu format
+    :param dev_set: Development set file in conllu format
+    :param test_set: Test set file in conllu format
+    :param set: Name (language) of dataset, for example 'en'
+    :return: list of accuracies (floats) scored by all models trained on the dataset
+    against the test set.
+    """
     # 1: EXTRACT AND REFORMAT DATA
 
     tagged_sents_train, tagged_sents_val, tagged_sents_test, sentences_train, sentences_val, sentences_test = \
